@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) !void {
 
     // Expose this as a module that others can import
     _ = b.addModule("rbac", .{
-        .root_source_file = b.path("src/pg.zig"),
+        .root_source_file = b.path("src/root.zig"),
         .imports = &.{
             .{ .name = "httpz", .module = modules.get("httpz").? },
             .{ .name = "pg", .module = modules.get("pg").? },
