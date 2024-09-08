@@ -1,6 +1,5 @@
 const std = @import("std");
 const httpz = @import("httpz");
-const Types = @import("types.zig");
 
 pub fn CreateStructFromEnum(comptime enum_type: type, comptime val_type: type, comptime field_default: ?val_type) type {
     const enum_fields = @typeInfo(enum_type).Enum.fields;
