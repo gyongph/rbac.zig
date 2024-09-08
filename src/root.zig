@@ -1,5 +1,6 @@
-pub const MainModule = @import("main.zig").MainModule;
-pub const AuthToken = @import("auth-token.zig");
-pub const TypeUtils = @import("type-utils.zig");
-pub const httpz = @import("httpz");
-pub const pg = @import("pg");
+const lib = @import("lib.zig");
+pub const pg = lib.pg;
+pub const httpz = lib.httpz;
+pub const MainModule = lib.MainModule;
+pub const AuthToken = lib.AuthToken;
+pub const TypeUtils = lib.TypeUtils;
