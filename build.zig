@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) !void {
     try modules.put("pg", b.dependency("pg", dep_opts).module("pg"));
 
     // Expose this as a module that others can import
-    _ = b.addModule("pg", .{
+    _ = b.addModule("rbac", .{
         .root_source_file = b.path("src/pg.zig"),
         .imports = &.{
             .{ .name = "httpz", .module = modules.get("httpz").? },
