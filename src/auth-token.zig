@@ -1,7 +1,7 @@
 const std = @import("std");
 const random = std.crypto.random;
-const base64 = @import("../../utils/base64.zig");
-const sha512 = @import("../../utils/hash.zig");
+const base64 = @import("base64.zig");
+const sha512 = @import("hash.zig");
 
 // example of token payload data that has the maximum size
 // if you want to add something in the token payload you need to update this
