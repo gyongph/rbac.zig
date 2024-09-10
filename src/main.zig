@@ -17,7 +17,7 @@ const base64 = Utils.Base64;
 
 pub fn MainModule(role: type) type {
     const RBA = struct {
-        pub const Global = struct { pg_pool: *pg.Pool, auth: struct { id: []const u8, role: role } };
+        pub const Global = struct { pg_pool: *pg.Pool, auth: struct { id: ?[]const u8, role: role } };
         pub const Token = struct {
             const Self = @This();
             const Payload = struct {
