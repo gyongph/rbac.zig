@@ -161,7 +161,8 @@ pub fn MainModule(role: type) type {
                         res.status = 401;
                         std.log.info("401 {s} {s} {}", .{ @tagName(req.method), req.url.path, err });
                     },
-                    else => {
+                    else => |_err| {
+                        std.log.warn("{}", .{_err});
                         res.status = 500;
                         res.body = "bad request";
                     },
