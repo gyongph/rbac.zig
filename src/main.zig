@@ -161,6 +161,10 @@ pub fn MainModule(role: type) type {
                         res.status = 401;
                         std.log.info("401 {s} {s} {}", .{ @tagName(req.method), req.url.path, err });
                     },
+                    error.INVALID_TOKEN => {
+                        res.status = 400;
+                        res.body = "Invalid token";
+                    },
                     else => |_err| {
                         std.log.warn("{}", .{_err});
                         res.status = 500;
