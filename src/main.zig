@@ -9,10 +9,88 @@ const Response = httpz.Response;
 
 const print = std.debug.print;
 const allocPrint = std.fmt.allocPrint;
+const random = std.crypto.random;
 const assert = Utils.assert;
+const EnvVar = Utils.EnvVar;
+const sha512 = Utils.Hash;
+const base64 = Utils.Base64;
+
 pub fn MainModule(role: type) type {
     const RBA = struct {
         pub const Global = struct { pg_pool: *pg.Pool, auth: struct { id: []const u8, role: role } };
+        pub const Token = struct {
+            const Self = @This();
+            const Payload = struct {
+                id: ?[]const u8,
+                role: role = .Guest,
+                created_at: i64,
+                expires_at: i64,
+            };
+            const ReturnToken = struct {
+                access_token: []const u8,
+                refresh_token: []const u8,
+                access_token_expires_at: i64,
+                refresh_token_expires_at: i64,
+            };
+            const token_data_separator = "‎"; // empty space
+
+            /// expires_at is in minutes;
+            pub fn create(alloc: std.mem.Allocator, payload: struct { id: []const u8, role: role }) !ReturnToken {
+                const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
+                const REFRESH_TOKEN_SECRET = try EnvVar.get("REFRESH_TOKEN_SECRET");
+                const ACCESS_TOKEN_EXPIRES_AT_MIN = try std.fmt.parseInt(i64, try EnvVar.get("ACCESS_TOKEN_EXPIRES_AT_MIN"), 10);
+                const REFRESH_TOKEN_EXPIRES_AT_MIN = try std.fmt.parseInt(i64, try EnvVar.get("REFRESH_TOKEN_EXPIRES_AT_MIN"), 10);
+                const now = std.time.timestamp();
+                const access_token_expires_at = now + ACCESS_TOKEN_EXPIRES_AT_MIN;
+                const refresh_token_expires_at = now + REFRESH_TOKEN_EXPIRES_AT_MIN;
+                const access_token = .{ .id = payload.id, .role = payload.role, .created_at = now, .expires_at = access_token_expires_at };
+                const refresh_token = .{ .id = payload.id, .role = payload.role, .created_at = now, .expires_at = refresh_token_expires_at };
+                return ReturnToken{
+                    .access_token = try generateToken(alloc, access_token, ACCESS_TOKEN_SECRET),
+                    .refresh_token = try generateToken(alloc, refresh_token, REFRESH_TOKEN_SECRET),
+                    .access_token_expires_at = access_token_expires_at,
+                    .refresh_token_expires_at = refresh_token_expires_at,
+                };
+            }
+
+            pub fn generateToken(alloc: std.mem.Allocator, payload: anytype, secret: []const u8) ![]const u8 {
+                var stream = std.ArrayList(u8).init(alloc);
+                try std.json.stringify(payload, .{}, stream.writer());
+                const stringified_payload = try std.heap.page_allocator.dupe(u8, stream.items[0..stream.items.len]);
+                stream.deinit();
+
+                var salt = [_]u8{undefined} ** 64;
+                random.bytes(&salt);
+                const hash_payload = try std.mem.concat(alloc, u8, &.{ &salt, stringified_payload, secret });
+
+                const signature = try sha512.hash(hash_payload);
+
+                alloc.free(hash_payload);
+                const token = try std.mem.join(alloc, token_data_separator, &.{ &salt, stringified_payload, signature });
+                defer alloc.free(token);
+
+                const url_safe_token = try base64.encode(token);
+                return url_safe_token;
+            }
+
+            pub fn parse(allocator: std.mem.Allocator, token: []const u8, secret: []const u8) !Payload {
+                const now = std.time.timestamp();
+                const raw_buf = try base64.decode(token);
+                var token_parts = std.mem.split(u8, raw_buf, token_data_separator);
+                const random_bytes = token_parts.next().?;
+                const payload = token_parts.next().?;
+                const signature = token_parts.next().?;
+                const challenge = try std.mem.concat(allocator, u8, &.{ random_bytes, payload, secret });
+                defer allocator.free(challenge);
+                const resulted_hash = try sha512.hash(challenge);
+                const same_hash = std.mem.eql(u8, signature, resulted_hash);
+                if (!same_hash) return error.INVALID_TOKEN;
+                const parsed_payload = try std.json.parseFromSlice(Payload, allocator, payload, .{});
+                if (parsed_payload.value.expires_at < now) return error.INVALID_TOKEN;
+                defer parsed_payload.deinit();
+                return parsed_payload.value;
+            }
+        };
         var _global: Global = undefined;
 
         const Server = struct {
@@ -62,6 +140,20 @@ pub fn MainModule(role: type) type {
                 req: *httpz.Request,
                 res: *httpz.Response,
             ) !void {
+                const bearer_token = req.header("authorization");
+                if (bearer_token == null) {
+                    global.auth.id = null;
+                    global.auth.role = .Guest;
+                } else {
+                    const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
+                    const itr = std.mem.split(u8, bearer_token.?, "Bearer ");
+                    const maybe_token = itr.next();
+                    if (maybe_token) |token| {
+                        const payload = try Token.parse(req.arena, token, ACCESS_TOKEN_SECRET);
+                        global.auth.id = payload.id;
+                        global.auth.role = payload.role;
+                    } else error.BAD_REQUEST;
+                }
                 try action(global, req, res);
             }
             pub fn errorHandler(global: *Global, req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
@@ -112,7 +204,8 @@ pub fn MainModule(role: type) type {
         }
 
         const ModuleStruct = struct {};
-
+        /// Field of your schema should follow the pg.zig constraints \
+        /// check pg.zig [supported types](https://github.com/karlseguin/pg.zig?tab=readme-ov-file#array-columns)
         pub fn Module(comptime Schema: type, schema_fields: ?type, Accesor: type) type {
             const OptionalSchema = TypeUtils.Partial(Schema);
             const Fields = if (schema_fields == null) TypeUtils.StructFieldsAsEnum(Schema) else schema_fields.?;
