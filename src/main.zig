@@ -145,7 +145,7 @@ pub fn MainModule(role: type) type {
                     global.auth.role = .Guest;
                 } else {
                     const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
-                    const itr = std.mem.split(u8, bearer_token.?, "Bearer ");
+                    var itr = std.mem.split(u8, bearer_token.?, "Bearer ");
                     const maybe_token = itr.next();
                     if (maybe_token) |token| {
                         const payload = try Token.parse(req.arena, token, ACCESS_TOKEN_SECRET);
