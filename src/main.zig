@@ -168,7 +168,6 @@ pub fn MainModule(role: type) type {
                     else => |_err| {
                         std.log.warn("{}", .{_err});
                         res.status = 500;
-                        res.body = "bad request";
                     },
                 }
             }
