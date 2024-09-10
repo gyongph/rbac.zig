@@ -41,8 +41,8 @@ pub fn MainModule(role: type) type {
                 const ACCESS_TOKEN_EXPIRES_AT_MIN = try std.fmt.parseInt(i64, try EnvVar.get("ACCESS_TOKEN_EXPIRES_AT_MIN"), 10);
                 const REFRESH_TOKEN_EXPIRES_AT_MIN = try std.fmt.parseInt(i64, try EnvVar.get("REFRESH_TOKEN_EXPIRES_AT_MIN"), 10);
                 const now = std.time.timestamp();
-                const access_token_expires_at = now + ACCESS_TOKEN_EXPIRES_AT_MIN;
-                const refresh_token_expires_at = now + REFRESH_TOKEN_EXPIRES_AT_MIN;
+                const access_token_expires_at = now + (ACCESS_TOKEN_EXPIRES_AT_MIN * std.time.ms_per_min);
+                const refresh_token_expires_at = now + (REFRESH_TOKEN_EXPIRES_AT_MIN * std.time.ms_per_min);
                 const access_token = .{ .id = payload.id, .role = payload.role, .created_at = now, .expires_at = access_token_expires_at };
                 const refresh_token = .{ .id = payload.id, .role = payload.role, .created_at = now, .expires_at = refresh_token_expires_at };
                 return ReturnToken{
@@ -77,16 +77,16 @@ pub fn MainModule(role: type) type {
                 const now = std.time.timestamp();
                 const raw_buf = try base64.decode(token);
                 var token_parts = std.mem.split(u8, raw_buf, token_data_separator);
-                const random_bytes = token_parts.next().?;
-                const payload = token_parts.next().?;
-                const signature = token_parts.next().?;
+                const random_bytes = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
+                const payload = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
+                const signature = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
                 const challenge = try std.mem.concat(allocator, u8, &.{ random_bytes, payload, secret });
                 defer allocator.free(challenge);
                 const resulted_hash = try sha512.hash(challenge);
                 const same_hash = std.mem.eql(u8, signature, resulted_hash);
                 if (!same_hash) return error.INVALID_TOKEN;
                 const parsed_payload = try std.json.parseFromSlice(Payload, allocator, payload, .{});
-                if (parsed_payload.value.expires_at < now) return error.INVALID_TOKEN;
+                if (parsed_payload.value.expires_at < now) return error.EXPIRED_TOKEN;
                 defer parsed_payload.deinit();
                 return parsed_payload.value;
             }
@@ -151,7 +151,7 @@ pub fn MainModule(role: type) type {
                         const payload = try Token.parse(req.arena, token, ACCESS_TOKEN_SECRET);
                         global.auth.id = payload.id;
                         global.auth.role = payload.role;
-                    } else error.BAD_REQUEST;
+                    } else return error.BAD_REQUEST;
                 }
                 try action(global, req, res);
             }
@@ -179,8 +179,8 @@ pub fn MainModule(role: type) type {
             _global = Global{
                 .pg_pool = args.pg_pool,
                 .auth = .{
-                    .id = "user0",
-                    .role = .Admin,
+                    .id = null,
+                    .role = .Guest,
                 },
             };
             var server = try httpz.ServerApp(*Global).init(
