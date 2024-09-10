@@ -1,15 +1,15 @@
 const std = @import("std");
 const httpz = @import("httpz");
 const pg = @import("pg");
-
 const TypeUtils = @import("type-utils.zig");
+const Utils = @import("utils/lib.zig");
+
 const Request = httpz.Request;
 const Response = httpz.Response;
 
-const assert = std.debug.assert;
 const print = std.debug.print;
 const allocPrint = std.fmt.allocPrint;
-
+const assert = Utils.assert;
 pub fn MainModule(role: type) type {
     const RBA = struct {
         pub const Global = struct { pg_pool: *pg.Pool, auth: struct { id: []const u8, role: role } };
@@ -114,7 +114,7 @@ pub fn MainModule(role: type) type {
         const ModuleStruct = struct {};
 
         pub fn Module(comptime Schema: type, schema_fields: ?type, Accesor: type) type {
-            const OptionalSchema = TypeUtils.createNullableStructField(Schema);
+            const OptionalSchema = TypeUtils.Partial(Schema);
             const Fields = if (schema_fields == null) TypeUtils.StructFieldsAsEnum(Schema) else schema_fields.?;
             const Route = struct {
                 method: httpz.Method,
@@ -214,7 +214,7 @@ pub fn MainModule(role: type) type {
                             const alloc = req.arena;
                             const id = req.param("id").?;
                             const type_info = @typeInfo(@TypeOf(self.field_access));
-                            assert(type_info == .Struct);
+                            assert(type_info == .Struct, "Expects struct but found" ++ @typeName(@TypeOf(self.field_access)));
                             const accessor = try self.getAccessor(ctx, req, res);
                             if (accessor == null) return error.UNAUTHORIZED;
                             const accessor_name = @tagName(accessor.?);
@@ -288,7 +288,7 @@ pub fn MainModule(role: type) type {
                             const alloc = req.arena;
                             const id = req.param("id").?;
                             const type_info = @typeInfo(@TypeOf(self.field_access));
-                            assert(type_info == .Struct);
+                            assert(type_info == .Struct, "Expectes struct type but found " ++ @typeName(@TypeOf(self.field_access)));
                             const accessor = try self.getAccessor(ctx, req, res);
                             if (accessor == null) return error.UNAUTHORIZED;
                             const accessor_name = @tagName(accessor.?);
