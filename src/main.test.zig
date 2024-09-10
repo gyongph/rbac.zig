@@ -134,20 +134,13 @@ test "SubModule" {
 }
 
 test "Token" {
-    const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
-    const REFRESH_TOKEN_SECRET = try EnvVar.get("REFRESH_TOKEN_SECRET");
+    const secret = "asdfkjjkljdfsfaslkdjf";
     const allocator = testing.allocator;
     const Token = main_module.Token;
-    const payload = .{ .id = "user1", .role = .Admin };
-    const result = try Token.create(allocator, payload);
-    const access_token_payload = try Token.parse(allocator, result.access_token, ACCESS_TOKEN_SECRET);
-    const refresh_token_payload = try Token.parse(allocator, result.refresh_token, REFRESH_TOKEN_SECRET);
-    try testing.expectEqualStrings(access_token_payload.id.?, "user1");
-    try testing.expectEqualStrings(refresh_token_payload.id.?, "user1");
-    try testing.expectEqual(access_token_payload.role, .Admin);
-    try testing.expectEqual(refresh_token_payload.role, .Admin);
-    try testing.expect(@hasField(@TypeOf(access_token_payload), "expires_at"));
-    try testing.expect(@hasField(@TypeOf(refresh_token_payload), "expires_at"));
-    try testing.expect(@hasField(@TypeOf(access_token_payload), "created_at"));
-    try testing.expect(@hasField(@TypeOf(refresh_token_payload), "created_at"));
+    const payload = .{ .id = "user1", .role = .Admin, .expires_at = 5 };
+    const result = try Token.create(allocator, payload, secret);
+    const token = result.token;
+    const parsed = try Token.parse(allocator, token, secret);
+    try testing.expectEqualStrings(parsed.id, payload.id);
+    try testing.expectEqual(parsed.role, payload.role);
 }
