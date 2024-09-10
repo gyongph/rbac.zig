@@ -21,12 +21,13 @@ pub fn MainModule(role: type) type {
         pub const Token = struct {
             const Self = @This();
             const Payload = struct {
-                id: ?[]const u8,
+                id: []const u8,
                 role: role = .Guest,
                 created_at: i64,
                 expires_at: i64,
             };
             const ReturnToken = struct {
+                id: []const u8,
                 access_token: []const u8,
                 refresh_token: []const u8,
                 access_token_expires_at: i64,
@@ -46,6 +47,7 @@ pub fn MainModule(role: type) type {
                 const access_token = .{ .id = payload.id, .role = payload.role, .created_at = now, .expires_at = access_token_expires_at };
                 const refresh_token = .{ .id = payload.id, .role = payload.role, .created_at = now, .expires_at = refresh_token_expires_at };
                 return ReturnToken{
+                    .id = payload.id,
                     .access_token = try generateToken(alloc, access_token, ACCESS_TOKEN_SECRET),
                     .refresh_token = try generateToken(alloc, refresh_token, REFRESH_TOKEN_SECRET),
                     .access_token_expires_at = access_token_expires_at,
