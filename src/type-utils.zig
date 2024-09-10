@@ -1,5 +1,7 @@
 const std = @import("std");
 const httpz = @import("httpz");
+const testing = std.testing;
+const mem = std.mem;
 
 pub fn CreateStructFromEnum(comptime enum_type: type, comptime val_type: type, comptime field_default: ?val_type) type {
     const enum_fields = @typeInfo(enum_type).Enum.fields;
@@ -50,7 +52,7 @@ pub fn changeStructFieldValueType(comptime str: type, comptime val_type: type) t
         },
     });
 }
-pub fn createNullableStructField(comptime str: type) type {
+pub fn Partial(comptime str: type) type {
     const real_struct = comptime switch (@typeInfo(str)) {
         .Struct => |struct_info| struct_info,
         else => @compileError("str must be a struct"),
@@ -131,4 +133,103 @@ pub fn StructFieldsAsEnum(comptime s: anytype) type {
         .decls = &[_]std.builtin.Type.Declaration{},
         .is_exhaustive = true,
     } });
+}
+
+pub fn Omit(comptime s: type, comptime f: anytype) type {
+    const s_info = @typeInfo(s);
+    const f_info = @typeInfo(@TypeOf(f));
+    if (s_info != .Struct) @compileError("First argument should be a struct type but received " ++ @typeName(s));
+    if (f_info != .Struct) @compileError("Second argument should be a tuple of strings but received " ++ @typeName(@TypeOf(f)));
+    const s_items = s_info.Struct.fields;
+    const f_items = f_info.Struct.fields;
+    var included_count = 0;
+
+    var new_fields: [s_items.len]std.builtin.Type.StructField = undefined;
+    inline for (s_items) |s_field| {
+        const name = s_field.name;
+        var included = false;
+        inline for (f_items) |f_field| {
+            const field_name = @field(f, f_field.name);
+            const match = std.mem.eql(u8, field_name, name);
+            if (match) {
+                included = true;
+                break;
+            }
+        }
+        if (!included) {
+            new_fields[included_count] = s_field;
+            included_count += 1;
+        }
+    }
+    return @Type(.{
+        .Struct = .{
+            .layout = .auto,
+            .fields = new_fields[0..included_count],
+            .decls = &[_]std.builtin.Type.Declaration{},
+            .is_tuple = false,
+        },
+    });
+}
+
+pub fn Pick(comptime s: type, comptime f: anytype) type {
+    const s_info = @typeInfo(s);
+    const f_info = @typeInfo(@TypeOf(f));
+    if (s_info != .Struct) @compileError("First argument should be a struct type but received " ++ @typeName(s));
+    if (f_info != .Struct) @compileError("Second argument should be a tuple of strings but received " ++ @typeName(@TypeOf(f)));
+    const f_items = f_info.Struct.fields;
+    const s_items = s_info.Struct.fields;
+
+    var new_fields: [f_items.len]std.builtin.Type.StructField = undefined;
+    inline for (f_items, 0..) |item, i| {
+        const field_name = @field(f, item.name);
+        var included = false;
+        inline for (s_items) |s_field| {
+            const match = std.mem.eql(u8, field_name, s_field.name);
+            if (match) {
+                new_fields[i] = s_field;
+                included = true;
+                break;
+            }
+        }
+        if (!included) @compileError(field_name ++ " is not a member of " ++ @typeName(s));
+    }
+    return @Type(.{
+        .Struct = .{
+            .layout = .auto,
+            .fields = new_fields[0..],
+            .decls = &[_]std.builtin.Type.Declaration{},
+            .is_tuple = false,
+        },
+    });
+}
+
+test "Omit" {
+    const data = struct {
+        id: []const u8,
+        email: []const u8,
+        username: []const u8,
+        password: []const u8,
+        password_salt: []const u8,
+    };
+    const omitted = Omit(data, .{ "id", "password_salt" });
+    try testing.expect(!@hasField(omitted, "id"));
+    try testing.expect(!@hasField(omitted, "password_salt"));
+    try testing.expect(@hasField(omitted, "email"));
+    try testing.expect(@hasField(omitted, "username"));
+    try testing.expect(@hasField(omitted, "password"));
+    try testing.expect(@typeInfo(omitted).Struct.fields.len == 3);
+}
+
+test "Pick" {
+    const data = struct {
+        id: []const u8,
+        email: []const u8,
+        username: []const u8,
+        password: []const u8,
+        password_salt: []const u8,
+    };
+    const picked = Pick(data, .{ "password_salt", "id" });
+    try testing.expect(@hasField(picked, "password_salt"));
+    try testing.expect(@hasField(picked, "id"));
+    try testing.expect(@typeInfo(picked).Struct.fields.len == 2);
 }
