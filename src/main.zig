@@ -95,7 +95,6 @@ pub fn MainModule(role: type) type {
 
         const Server = struct {
             pg_pool: *pg.Pool,
-            token_secret: []const u8,
             port: u16,
             http_server: httpz.ServerApp(*Global) = undefined,
 
@@ -197,7 +196,6 @@ pub fn MainModule(role: type) type {
             server.errorHandler(Server.errorHandler);
             return Server{
                 .pg_pool = args.pg_pool,
-                .token_secret = args.token_secret,
                 .port = args.port,
                 .http_server = server,
             };
