@@ -173,7 +173,6 @@ pub fn MainModule(role: type) type {
             alloc: std.mem.Allocator,
             args: struct {
                 pg_pool: *pg.Pool,
-                token_secret: []const u8,
                 port: u16,
             },
         ) !Server {
