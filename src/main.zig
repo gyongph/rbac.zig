@@ -166,7 +166,7 @@ pub fn MainModule(role: type) type {
                         res.body = "Invalid token";
                     },
                     else => |_err| {
-                        std.log.warn("{s} => {}", .{ req.url.path, _err });
+                        std.log.warn("{s} {s} => {}", .{ @tagName(req.method), req.url.path, _err });
                         res.status = 500;
                     },
                 }
