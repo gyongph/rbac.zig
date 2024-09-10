@@ -20,42 +20,38 @@ pub fn MainModule(role: type) type {
         pub const Global = struct { pg_pool: *pg.Pool, auth: struct { id: ?[]const u8, role: role } };
         pub const Token = struct {
             const Self = @This();
+            const ReturnToken = struct {
+                token: []const u8,
+                created_at: i64,
+                expirest_at: i64,
+            };
             const Payload = struct {
                 id: []const u8,
                 role: role = .Guest,
                 created_at: i64,
                 expires_at: i64,
             };
-            const ReturnToken = struct {
-                id: []const u8,
-                access_token: []const u8,
-                refresh_token: []const u8,
-                access_token_expires_at: i64,
-                refresh_token_expires_at: i64,
-            };
             const token_data_separator = "‎"; // empty space
 
             /// expires_at is in minutes;
-            pub fn create(alloc: std.mem.Allocator, payload: struct { id: []const u8, role: role }) !ReturnToken {
-                const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
-                const REFRESH_TOKEN_SECRET = try EnvVar.get("REFRESH_TOKEN_SECRET");
-                const ACCESS_TOKEN_EXPIRES_AT_MIN = try std.fmt.parseInt(i64, try EnvVar.get("ACCESS_TOKEN_EXPIRES_AT_MIN"), 10);
-                const REFRESH_TOKEN_EXPIRES_AT_MIN = try std.fmt.parseInt(i64, try EnvVar.get("REFRESH_TOKEN_EXPIRES_AT_MIN"), 10);
+            pub fn create(alloc: std.mem.Allocator, payload: struct { id: []const u8, role: role, expires_at: i64 }, secret: []const u8) !ReturnToken {
                 const now = std.time.timestamp();
-                const access_token_expires_at = now + (ACCESS_TOKEN_EXPIRES_AT_MIN * std.time.ms_per_min);
-                const refresh_token_expires_at = now + (REFRESH_TOKEN_EXPIRES_AT_MIN * std.time.ms_per_min);
-                const access_token = .{ .id = payload.id, .role = payload.role, .created_at = now, .expires_at = access_token_expires_at };
-                const refresh_token = .{ .id = payload.id, .role = payload.role, .created_at = now, .expires_at = refresh_token_expires_at };
-                return ReturnToken{
+                const expires_at = now + (payload.expires_at * std.time.ms_per_min);
+                const token_payload = .{
                     .id = payload.id,
-                    .access_token = try generateToken(alloc, access_token, ACCESS_TOKEN_SECRET),
-                    .refresh_token = try generateToken(alloc, refresh_token, REFRESH_TOKEN_SECRET),
-                    .access_token_expires_at = access_token_expires_at,
-                    .refresh_token_expires_at = refresh_token_expires_at,
+                    .role = payload.role,
+                    .created_at = now,
+                    .expires_at = expires_at,
+                };
+                const token = try generateToken(alloc, token_payload, secret);
+                return ReturnToken{
+                    .token = token,
+                    .created_at = now,
+                    .expirest_at = expires_at,
                 };
             }
 
-            pub fn generateToken(alloc: std.mem.Allocator, payload: anytype, secret: []const u8) ![]const u8 {
+            pub fn generateToken(alloc: std.mem.Allocator, payload: Payload, secret: []const u8) ![]const u8 {
                 var stream = std.ArrayList(u8).init(alloc);
                 try std.json.stringify(payload, .{}, stream.writer());
                 const stringified_payload = try std.heap.page_allocator.dupe(u8, stream.items[0..stream.items.len]);
