@@ -106,18 +106,19 @@ pub fn MainModule(role: type) type {
             fn registerModule(self: *Server, comptime parent_path: []const u8, comptime module: anytype) !void {
                 var router = self.http_server.router();
                 const path = parent_path ++ module.path;
+                const id_param = "/:" ++ module.name ++ "_id";
                 print("\x1b[34mModule_loaded: {s} {s}: {s}\x1b[m\n", .{ module.name, path, @typeName(@TypeOf(module)) });
                 var group = router.group(path, .{});
                 group.get("/", module.listHandler().action);
                 std.log.info("\x1b[32mRoute added: GET {s}/\x1b[m", .{path});
                 group.post("/", module.createAction().action);
                 std.log.info("\x1b[32mRoute added: POST {s}/\x1b[m", .{path});
-                group.delete("/:id", module.deleteHandler().action);
-                std.log.info("\x1b[32mRoute added: DELETE {s}/:id\x1b[m", .{path});
-                group.get("/:id", module.getById);
-                std.log.info("\x1b[32mRoute added: GET {s}/:id\x1b[m", .{path});
-                group.patch("/:id", module.updateById);
-                std.log.info("\x1b[32mRoute added: PATCH {s}/:id\x1b[m", .{path});
+                group.delete(id_param, module.deleteHandler().action);
+                std.log.info("\x1b[32mRoute added: DELETE {s}{s}\x1b[m", .{ path, id_param });
+                group.get(id_param, module.getById);
+                std.log.info("\x1b[32mRoute added: GET {s}{s}\x1b[m", .{ path, id_param });
+                group.patch(id_param, module.updateById);
+                std.log.info("\x1b[32mRoute added: PATCH {s}{s}\x1b[m", .{ path, id_param });
 
                 // other routes
                 if (module.routes) |routes| {
@@ -140,7 +141,7 @@ pub fn MainModule(role: type) type {
                     const child_info = @typeInfo(sub_info.Pointer.child);
                     if (child_info == .Struct and child_info.Struct.is_tuple == true) {
                         inline for (sub.*) |mod| {
-                            try self.registerModule(path, &mod);
+                            try self.registerModule(path ++ id_param, &mod);
                         }
                     }
                 }
@@ -319,7 +320,7 @@ pub fn MainModule(role: type) type {
                     return struct {
                         pub fn action(ctx: *Global, req: *Request, res: *Response) !void {
                             const alloc = req.arena;
-                            const id = req.param("id").?;
+                            const id = req.param(self.name ++ "_id").?;
                             const type_info = @typeInfo(@TypeOf(self.field_access));
                             assert(type_info == .Struct, "Expects struct but found" ++ @typeName(@TypeOf(self.field_access)));
                             const accessor = try self.getAccessor(ctx, req, res);
@@ -393,7 +394,7 @@ pub fn MainModule(role: type) type {
                     return struct {
                         pub fn action(ctx: *Global, req: *Request, res: *Response) !void {
                             const alloc = req.arena;
-                            const id = req.param("id").?;
+                            const id = req.param(self.name ++ "_id").?;
                             const type_info = @typeInfo(@TypeOf(self.field_access));
                             assert(type_info == .Struct, "Expectes struct type but found " ++ @typeName(@TypeOf(self.field_access)));
                             const accessor = try self.getAccessor(ctx, req, res);
