@@ -135,14 +135,14 @@ test "SubModule" {
 
 test "Token" {
     const secret = "asdfkjjkljdfsfaslkdjf";
-    const allocator = testing.allocator;
+    const testing_allocator = testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(testing_allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
     const Token = main_module.Token;
     const payload = .{ .id = "user1", .role = .Admin, .expires_at = 5 };
     const result = try Token.create(allocator, payload, secret);
-    defer result.deInit();
-    const token = result.token;
-    const parsed = try Token.parse(allocator, token, secret);
-    defer parsed.deInit();
-    try testing.expectEqualStrings(parsed.value.id, payload.id);
-    try testing.expectEqual(parsed.value.role, payload.role);
+    const parsed = try Token.parse(allocator, result.token, secret);
+    try testing.expectEqualStrings(parsed.id, payload.id);
+    try testing.expectEqual(parsed.role, payload.role);
 }

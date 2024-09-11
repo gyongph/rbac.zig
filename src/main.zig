@@ -21,14 +21,9 @@ pub fn MainModule(role: type) type {
         pub const Token = struct {
             const Self = @This();
             const ReturnToken = struct {
-                const _Self = @This();
-                allocator: std.mem.Allocator,
                 token: []const u8,
                 created_at: i64,
                 expirest_at: i64,
-                pub fn deInit(self: *const _Self) void {
-                    self.allocator.free(self.token);
-                }
             };
             const Payload = struct {
                 id: []const u8,
@@ -38,7 +33,8 @@ pub fn MainModule(role: type) type {
             };
             const token_data_separator = "‎"; // empty space
 
-            /// expires_at is in minutes;
+            /// requires an arena allocator to free all at once \
+            /// expires_at is in minutes
             pub fn create(alloc: std.mem.Allocator, payload: struct { id: []const u8, role: role, expires_at: i64 }, secret: []const u8) !ReturnToken {
                 const now = std.time.timestamp();
                 const expires_at = now + (payload.expires_at * std.time.ms_per_min);
@@ -50,7 +46,6 @@ pub fn MainModule(role: type) type {
                 };
                 const token = try generateToken(alloc, token_payload, secret);
                 return ReturnToken{
-                    .allocator = alloc,
                     .token = token,
                     .created_at = now,
                     .expirest_at = expires_at,
@@ -77,18 +72,8 @@ pub fn MainModule(role: type) type {
                 return base_64_token;
             }
 
-            const ParsedResult = struct {
-                const _Self = @This();
-                allocator: std.mem.Allocator,
-                value: Payload,
-                _parsed: std.json.Parsed(Payload),
-                _raw_payload: []const u8,
-                pub fn deInit(self: *const _Self) void {
-                    self._parsed.deinit();
-                    self.allocator.free(self._raw_payload);
-                }
-            };
-            pub fn parse(allocator: std.mem.Allocator, token: []const u8, secret: []const u8) !ParsedResult {
+            /// requires an arena allocator to free everything at once
+            pub fn parse(allocator: std.mem.Allocator, token: []const u8, secret: []const u8) !Payload {
                 const now = std.time.timestamp();
                 const raw_buf = try base64.decode(allocator, token);
                 var token_parts = std.mem.split(u8, raw_buf, token_data_separator);
@@ -104,12 +89,7 @@ pub fn MainModule(role: type) type {
 
                 const parsed_payload = try std.json.parseFromSlice(Payload, allocator, payload, .{});
                 if (parsed_payload.value.expires_at < now) return error.EXPIRED_TOKEN;
-                return ParsedResult{
-                    .allocator = allocator,
-                    .value = parsed_payload.value,
-                    ._parsed = parsed_payload,
-                    ._raw_payload = raw_buf,
-                };
+                return parsed_payload.value;
             }
         };
         var _global: Global = undefined;
