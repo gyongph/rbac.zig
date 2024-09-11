@@ -54,18 +54,17 @@ pub fn MainModule(role: type) type {
 
             pub fn generateToken(alloc: std.mem.Allocator, payload: Payload, secret: []const u8) ![]const u8 {
                 var stream = std.ArrayList(u8).init(alloc);
-                try std.json.stringify(payload, .{}, stream.writer());
-                const stringified_payload = try std.heap.page_allocator.dupe(u8, stream.items[0..stream.items.len]);
                 stream.deinit();
+                try std.json.stringify(payload, .{}, stream.writer());
 
                 var salt = [_]u8{undefined} ** 64;
                 random.bytes(&salt);
-                const hash_payload = try std.mem.concat(alloc, u8, &.{ &salt, stringified_payload, secret });
+                const hash_payload = try std.mem.concat(alloc, u8, &.{ &salt, stream.items, secret });
                 var signature = [_]u8{undefined} ** 64;
                 try sha512.hash(hash_payload, &signature);
 
                 alloc.free(hash_payload);
-                const token = try std.mem.join(alloc, token_data_separator, &.{ &salt, stringified_payload, &signature });
+                const token = try std.mem.join(alloc, token_data_separator, &.{ &salt, stream.items, &signature });
                 defer alloc.free(token);
 
                 const base_64_token = try base64.encode(alloc, token);
