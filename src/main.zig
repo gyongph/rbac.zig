@@ -139,7 +139,7 @@ pub fn MainModule(role: type) type {
                 if (sub_info == .Pointer) {
                     const child_info = @typeInfo(sub_info.Pointer.child);
                     if (child_info == .Struct and child_info.Struct.is_tuple == true) {
-                        inline for (sub.*) |mod| {
+                        inline for (sub.*) |*mod| {
                             try self.registerModule(path, mod);
                         }
                     }
