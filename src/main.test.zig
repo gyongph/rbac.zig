@@ -139,8 +139,10 @@ test "Token" {
     const Token = main_module.Token;
     const payload = .{ .id = "user1", .role = .Admin, .expires_at = 5 };
     const result = try Token.create(allocator, payload, secret);
+    defer result.deInit();
     const token = result.token;
     const parsed = try Token.parse(allocator, token, secret);
-    try testing.expectEqualStrings(parsed.id, payload.id);
-    try testing.expectEqual(parsed.role, payload.role);
+    defer parsed.deInit();
+    try testing.expectEqualStrings(parsed.value.id, payload.id);
+    try testing.expectEqual(parsed.value.role, payload.role);
 }

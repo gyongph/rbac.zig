@@ -21,9 +21,14 @@ pub fn MainModule(role: type) type {
         pub const Token = struct {
             const Self = @This();
             const ReturnToken = struct {
+                const _Self = @This();
+                allocator: std.mem.Allocator,
                 token: []const u8,
                 created_at: i64,
                 expirest_at: i64,
+                pub fn deInit(self: *const _Self) void {
+                    self.allocator.free(self.token);
+                }
             };
             const Payload = struct {
                 id: []const u8,
@@ -45,6 +50,7 @@ pub fn MainModule(role: type) type {
                 };
                 const token = try generateToken(alloc, token_payload, secret);
                 return ReturnToken{
+                    .allocator = alloc,
                     .token = token,
                     .created_at = now,
                     .expirest_at = expires_at,
@@ -60,33 +66,50 @@ pub fn MainModule(role: type) type {
                 var salt = [_]u8{undefined} ** 64;
                 random.bytes(&salt);
                 const hash_payload = try std.mem.concat(alloc, u8, &.{ &salt, stringified_payload, secret });
-
-                const signature = try sha512.hash(hash_payload);
+                var signature = [_]u8{undefined} ** 64;
+                try sha512.hash(hash_payload, &signature);
 
                 alloc.free(hash_payload);
-                const token = try std.mem.join(alloc, token_data_separator, &.{ &salt, stringified_payload, signature });
+                const token = try std.mem.join(alloc, token_data_separator, &.{ &salt, stringified_payload, &signature });
                 defer alloc.free(token);
 
-                const url_safe_token = try base64.encode(token);
-                return url_safe_token;
+                const base_64_token = try base64.encode(alloc, token);
+                return base_64_token;
             }
 
-            pub fn parse(allocator: std.mem.Allocator, token: []const u8, secret: []const u8) !Payload {
+            const ParsedResult = struct {
+                const _Self = @This();
+                allocator: std.mem.Allocator,
+                value: Payload,
+                _parsed: std.json.Parsed(Payload),
+                _raw_payload: []const u8,
+                pub fn deInit(self: *const _Self) void {
+                    self._parsed.deinit();
+                    self.allocator.free(self._raw_payload);
+                }
+            };
+            pub fn parse(allocator: std.mem.Allocator, token: []const u8, secret: []const u8) !ParsedResult {
                 const now = std.time.timestamp();
-                const raw_buf = try base64.decode(token);
+                const raw_buf = try base64.decode(allocator, token);
                 var token_parts = std.mem.split(u8, raw_buf, token_data_separator);
                 const random_bytes = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
                 const payload = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
                 const signature = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
                 const challenge = try std.mem.concat(allocator, u8, &.{ random_bytes, payload, secret });
                 defer allocator.free(challenge);
-                const resulted_hash = try sha512.hash(challenge);
-                const same_hash = std.mem.eql(u8, signature, resulted_hash);
+                var resulted_hash = [_]u8{undefined} ** 64;
+                try sha512.hash(challenge, &resulted_hash);
+                const same_hash = std.mem.eql(u8, signature, &resulted_hash);
                 if (!same_hash) return error.INVALID_TOKEN;
+
                 const parsed_payload = try std.json.parseFromSlice(Payload, allocator, payload, .{});
                 if (parsed_payload.value.expires_at < now) return error.EXPIRED_TOKEN;
-                defer parsed_payload.deinit();
-                return parsed_payload.value;
+                return ParsedResult{
+                    .allocator = allocator,
+                    .value = parsed_payload.value,
+                    ._parsed = parsed_payload,
+                    ._raw_payload = raw_buf,
+                };
             }
         };
         var _global: Global = undefined;
