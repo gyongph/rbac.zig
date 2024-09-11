@@ -2,6 +2,8 @@ const std = @import("std");
 const httpz = @import("httpz");
 const MainModule = @import("main.zig").MainModule;
 const Utils = @import("utils/lib.zig");
+const TypeUtils = @import("type-utils.zig");
+const StructFieldsAsEnum = TypeUtils.StructFieldsAsEnum;
 const EnvVar = Utils.EnvVar;
 const Request = httpz.Request;
 const Response = httpz.Response;
@@ -61,7 +63,44 @@ const Actions = struct {
     }
 };
 
-const SubModule = main_module.Module(User, UserField, Accesor).init(.{
+const Address = struct { line_1: []const u8, line_2: []const u8, city: []const u8 };
+const AddressField = enum { line_1, line_2, city };
+const AddressFieldSet = std.EnumSet(AddressField);
+const AddressModule = main_module.Module(Address, AddressField, Accesor, null).init(.{
+    .name = "address",
+    .path = "/address",
+    .getAccessor = Accesor.getAccessor,
+    .record_access = .{
+        .create = .{
+            .role = RoleSet.initEmpty(),
+            .handler = Actions.list,
+        },
+        .list = .{
+            .role = RoleSet.initEmpty(),
+            .handler = Actions.list,
+        },
+        .delete = .{
+            .accessor = AccesorSet.initEmpty(),
+            .handler = Actions.list,
+        },
+    },
+    .field_access = .{
+        .Admin = .{
+            .update = AddressFieldSet.initEmpty(),
+            .read = AddressFieldSet.initEmpty(),
+        },
+        .Owner = .{
+            .update = AddressFieldSet.initEmpty(),
+            .read = AddressFieldSet.initEmpty(),
+        },
+        .Public = .{
+            .update = AddressFieldSet.initEmpty(),
+            .read = AddressFieldSet.initEmpty(),
+        },
+    },
+});
+const sub_modules = &.{AddressModule};
+const UserModule = main_module.Module(User, UserField, Accesor, sub_modules).init(.{
     .name = "users",
     .path = "/users",
     .getAccessor = Accesor.getAccessor,
@@ -95,13 +134,13 @@ const SubModule = main_module.Module(User, UserField, Accesor).init(.{
     },
 });
 
-test "SubModule" {
+test "UserModule" {
     const Action = httpz.Action(*main_module.Global);
-    try testing.expectEqualStrings(SubModule.name, "users");
-    try testing.expectEqualStrings(SubModule.path, "/users");
-    try testing.expectEqual(SubModule.getAccessor, Accesor.getAccessor);
+    try testing.expectEqualStrings(UserModule.name, "users");
+    try testing.expectEqualStrings(UserModule.path, "/users");
+    try testing.expectEqual(UserModule.getAccessor, Accesor.getAccessor);
 
-    const record_access = SubModule.record_access;
+    const record_access = UserModule.record_access;
     const T_record_access = @TypeOf(record_access);
     try testing.expect(@hasField(T_record_access, "list"));
     try testing.expect(@hasField(T_record_access, "create"));
@@ -119,7 +158,7 @@ test "SubModule" {
     try testing.expect(@TypeOf(record_access.create.handler) == Action);
     try testing.expect(@TypeOf(record_access.delete.handler) == Action);
 
-    const field_access = SubModule.field_access;
+    const field_access = UserModule.field_access;
     const T_field_access = @TypeOf(field_access);
     try testing.expect(@hasField(T_field_access, "Admin"));
     try testing.expect(@hasField(T_field_access, "Owner"));

@@ -101,20 +101,23 @@ pub fn MainModule(role: type) type {
             pub fn register(self: *Server, module: anytype) !void {
                 const info = @typeInfo(@TypeOf(module));
                 if (info != .Pointer) @panic("Expects a pointer to a module");
-                print("module_loaded: {s} {s}: {}\n", .{ module.name, module.path, @TypeOf(module) });
+                try self.registerModule("", module);
+            }
+            fn registerModule(self: *Server, comptime parent_path: []const u8, comptime module: anytype) !void {
                 var router = self.http_server.router();
-                var group = router.group(module.path, .{});
-
+                const path = parent_path ++ module.path;
+                print("\x1b[34mModule_loaded: {s} {s}: {s}\x1b[m\n", .{ module.name, path, @typeName(@TypeOf(module)) });
+                var group = router.group(path, .{});
                 group.get("/", module.listHandler().action);
-                std.log.info("Route added: GET {s}/", .{module.path});
+                std.log.info("\x1b[32mRoute added: GET {s}/\x1b[m", .{path});
                 group.post("/", module.createAction().action);
-                std.log.info("Route added: POST {s}/", .{module.path});
+                std.log.info("\x1b[32mRoute added: POST {s}/\x1b[m", .{path});
                 group.delete("/:id", module.deleteHandler().action);
-                std.log.info("Route added: DELETE {s}/:id", .{module.path});
+                std.log.info("\x1b[32mRoute added: DELETE {s}/:id\x1b[m", .{path});
                 group.get("/:id", module.getById);
-                std.log.info("Route added: GET {s}/:id", .{module.path});
+                std.log.info("\x1b[32mRoute added: GET {s}/:id\x1b[m", .{path});
                 group.patch("/:id", module.updateById);
-                std.log.info("Route added: PATCH {s}/:id", .{module.path});
+                std.log.info("\x1b[32mRoute added: PATCH {s}/:id\x1b[m", .{path});
 
                 // other routes
                 if (module.routes) |routes| {
@@ -128,11 +131,20 @@ pub fn MainModule(role: type) type {
                             .OPTIONS => group.options(route.path, route.createHandler().action),
                             .HEAD => group.head(route.path, route.createHandler().action),
                         }
-                        std.log.info("Route added: {s} {s}{s}", .{ @tagName(route.method), module.path, route.path });
+                        std.log.info("\x1b[32mRoute added: {s} {s}{s}\x1b[m", .{ @tagName(route.method), path, route.path });
+                    }
+                }
+                const sub = module.sub_modules;
+                const sub_info = @typeInfo(@TypeOf(sub));
+                if (sub_info == .Pointer) {
+                    const child_info = @typeInfo(sub_info.Pointer.child);
+                    if (child_info == .Struct and child_info.Struct.is_tuple == true) {
+                        inline for (sub.*) |mod| {
+                            try self.registerModule(path, mod);
+                        }
                     }
                 }
             }
-
             pub fn dispatcher(
                 global: *Global,
                 action: httpz.Action(*Global),
@@ -208,7 +220,7 @@ pub fn MainModule(role: type) type {
         const ModuleStruct = struct {};
         /// Field of your schema should follow the pg.zig constraints \
         /// check pg.zig [supported types](https://github.com/karlseguin/pg.zig?tab=readme-ov-file#array-columns)
-        pub fn Module(comptime Schema: type, schema_fields: ?type, Accesor: type) type {
+        pub fn Module(comptime Schema: type, schema_fields: ?type, Accesor: type, sub_modules: anytype) type {
             const OptionalSchema = TypeUtils.Partial(Schema);
             const Fields = if (schema_fields == null) TypeUtils.StructFieldsAsEnum(Schema) else schema_fields.?;
             const Route = struct {
@@ -247,7 +259,7 @@ pub fn MainModule(role: type) type {
                 routes: ?[]const Route = null,
                 getById: httpz.Action(*Global) = undefined,
                 updateById: httpz.Action(*Global) = undefined,
-
+                sub_modules: @TypeOf(sub_modules) = sub_modules,
                 const Self = @This();
 
                 pub fn init(self: Self) Self {
