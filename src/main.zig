@@ -87,7 +87,7 @@ pub fn MainModule(role: type) type {
                 if (!same_hash) return error.INVALID_TOKEN;
 
                 const parsed_payload = try std.json.parseFromSlice(Payload, allocator, payload, .{});
-                if (parsed_payload.value.expires_at < now) return error.EXPIRED_TOKEN;
+                if (parsed_payload.value.expires_at >= now) return error.EXPIRED_TOKEN;
                 return parsed_payload.value;
             }
         };
@@ -177,8 +177,12 @@ pub fn MainModule(role: type) type {
                         std.log.info("401 {s} {s} {}", .{ @tagName(req.method), req.url.path, err });
                     },
                     error.INVALID_TOKEN => {
-                        res.status = 400;
+                        res.status = 401;
                         res.body = "Invalid token";
+                    },
+                    error.EXPIRED_TOKEN => {
+                        res.status = 401;
+                        res.body = "Expired token";
                     },
                     else => |_err| {
                         std.log.warn("{s} {s} => {}", .{ @tagName(req.method), req.url.path, _err });
