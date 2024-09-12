@@ -281,6 +281,10 @@ pub fn ChangeFieldType(comptime s: type, comptime name: [:0]const u8, comptime t
 
 test "ChangeFieldType" {
     const Sample = struct { name: []const u8, age: []const u8 };
-    const NewSample = ChangeFieldType(Sample, "age", ?[]const u8, null);
-    try testing.expect(@typeInfo(NewSample).Struct.fields[1].type == ?[]const u8);
+    const NewSample = ChangeFieldType(Sample, "age", ?usize, null);
+    try testing.expect(@typeInfo(NewSample).Struct.fields[1].type == ?usize);
+    const sample_a = NewSample{ .name = "jhon" };
+    try testing.expect(sample_a.age == null);
+    const sample_b = NewSample{ .name = "jhon", .age = 10 };
+    try testing.expect(sample_b.age == 10);
 }
