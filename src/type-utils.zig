@@ -241,12 +241,20 @@ pub fn ReplaceField(comptime s: type, comptime name: [:0]const u8, comptime new_
     for (fields, 0..) |f, i| {
         if (std.mem.eql(u8, f.name, name)) {
             found = true;
+            const info = @typeInfo(t);
+            var default_value: ?*const anyopaque = undefined;
+            if (info == .Optional and default == null) {
+                const null_val: t = null;
+                default_value = @as(*const anyopaque, &null_val);
+            } else {
+                default_value = if (default) |d| @as(*const anyopaque, @ptrCast(&d)) else null;
+            }
             new_fields[i] = std.builtin.Type.StructField{
+                .alignment = 0,
+                .default_value = default_value,
+                .is_comptime = false,
                 .name = new_name,
                 .type = t,
-                .default_value = if (@typeInfo(t) == .Optional and default == null) @as(*const anyopaque, &default) else if (@typeInfo(t) != .Optional and default != null) @as(*const anyopaque, @ptrCast(&default)) else null,
-                .is_comptime = false,
-                .alignment = 0,
             };
         } else new_fields[i] = f;
     }
@@ -273,6 +281,6 @@ pub fn ChangeFieldType(comptime s: type, comptime name: [:0]const u8, comptime t
 
 test "ChangeFieldType" {
     const Sample = struct { name: []const u8, age: []const u8 };
-    const NewSample = ChangeFieldType(Sample, "age", usize, null);
-    try testing.expect(@typeInfo(NewSample).Struct.fields[1].type == usize);
+    const NewSample = ChangeFieldType(Sample, "age", ?[]const u8, null);
+    try testing.expect(@typeInfo(NewSample).Struct.fields[1].type == ?[]const u8);
 }
