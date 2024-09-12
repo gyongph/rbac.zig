@@ -36,7 +36,7 @@ pub fn MainModule(role: type) type {
             /// requires an arena allocator to free all at once \
             /// expires_at is in minutes
             pub fn create(alloc: std.mem.Allocator, payload: struct { id: []const u8, role: role, expires_at: i64 }, secret: []const u8) !ReturnToken {
-                const now = std.time.timestamp();
+                const now = std.time.milliTimestamp();
                 const expires_at = now + (payload.expires_at * std.time.ms_per_min);
                 const token_payload = .{
                     .id = payload.id,
@@ -73,7 +73,7 @@ pub fn MainModule(role: type) type {
 
             /// requires an arena allocator to free everything at once
             pub fn parse(allocator: std.mem.Allocator, token: []const u8, secret: []const u8) !Payload {
-                const now = std.time.timestamp();
+                const now = std.time.milliTimestamp();
                 const raw_buf = try base64.decode(allocator, token);
                 var token_parts = std.mem.split(u8, raw_buf, token_data_separator);
                 const random_bytes = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
@@ -87,7 +87,7 @@ pub fn MainModule(role: type) type {
                 if (!same_hash) return error.INVALID_TOKEN;
 
                 const parsed_payload = try std.json.parseFromSlice(Payload, allocator, payload, .{});
-                if (parsed_payload.value.expires_at >= now) return error.EXPIRED_TOKEN;
+                if (parsed_payload.value.expires_at < now) return error.EXPIRED_TOKEN;
                 return parsed_payload.value;
             }
         };

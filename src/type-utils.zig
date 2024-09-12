@@ -233,3 +233,46 @@ test "Pick" {
     try testing.expect(@hasField(picked, "id"));
     try testing.expect(@typeInfo(picked).Struct.fields.len == 2);
 }
+
+pub fn ReplaceField(comptime s: type, comptime name: [:0]const u8, comptime new_name: [:0]const u8, comptime t: type, comptime default: ?t) type {
+    const fields = @typeInfo(s).Struct.fields;
+    var new_fields = [_]std.builtin.Type.StructField{undefined} ** fields.len;
+    var found = false;
+    for (fields, 0..) |f, i| {
+        if (std.mem.eql(u8, f.name, name)) {
+            found = true;
+            new_fields[i] = std.builtin.Type.StructField{
+                .name = new_name,
+                .type = t,
+                .default_value = if (@typeInfo(t) == .Optional and default == null) @as(*const anyopaque, &default) else if (@typeInfo(t) != .Optional and default != null) @as(*const anyopaque, @ptrCast(&default)) else null,
+                .is_comptime = false,
+                .alignment = 0,
+            };
+        } else new_fields[i] = f;
+    }
+    if (!found) @compileError(name ++ "does not exist in " ++ @typeName(s));
+    return @Type(.{
+        .Struct = .{
+            .layout = .auto,
+            .fields = new_fields[0..],
+            .decls = &[_]std.builtin.Type.Declaration{},
+            .is_tuple = false,
+        },
+    });
+}
+
+test "ReplaceField" {
+    const Sample = struct { name: []const u8, age: usize };
+    const NewSample = ReplaceField(Sample, "age", "birthdate", []const u8, null);
+    try testing.expect(@hasField(NewSample, "birthdate"));
+}
+
+pub fn ChangeFieldType(comptime s: type, comptime name: [:0]const u8, comptime t: type, comptime default: ?t) type {
+    return ReplaceField(s, name, name, t, default);
+}
+
+test "ChangeFieldType" {
+    const Sample = struct { name: []const u8, age: []const u8 };
+    const NewSample = ChangeFieldType(Sample, "age", usize, null);
+    try testing.expect(@typeInfo(NewSample).Struct.fields[1].type == usize);
+}
