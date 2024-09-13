@@ -77,7 +77,12 @@ const AddressModule = main_module.Module(Address, AddressField, Accesor, null).i
         },
         .list = .{
             .role = RoleSet.initEmpty(),
-            .handler = Actions.list,
+            .handler = .{
+                .config = .{
+                    .selected_fields = AddressFieldSet.initFull(),
+                    .where = "true",
+                },
+            },
         },
         .delete = .{
             .accessor = AccesorSet.initEmpty(),
@@ -107,7 +112,9 @@ const UserModule = main_module.Module(User, UserField, Accesor, sub_modules).ini
     .record_access = .{
         .list = .{
             .role = RoleSet.initFull(),
-            .handler = Actions.list,
+            .handler = .{
+                .custom = Actions.list,
+            },
         },
         .create = .{
             .role = RoleSet.initMany(&.{ .Admin, .Guest }),
@@ -154,7 +161,7 @@ test "UserModule" {
     try testing.expect(@hasField(@TypeOf(record_access.list), "handler"));
     try testing.expect(@hasField(@TypeOf(record_access.create), "handler"));
     try testing.expect(@hasField(@TypeOf(record_access.delete), "handler"));
-    try testing.expect(@TypeOf(record_access.list.handler) == Action);
+    try testing.expect(std.meta.activeTag(record_access.list.handler) == .custom);
     try testing.expect(@TypeOf(record_access.create.handler) == Action);
     try testing.expect(@TypeOf(record_access.delete.handler) == Action);
 

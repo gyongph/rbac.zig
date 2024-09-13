@@ -1,3 +1,4 @@
+const config = @import("config.zig");
 const std = @import("std");
 const httpz = @import("httpz");
 const pg = @import("pg");
@@ -17,6 +18,14 @@ const base64 = Utils.Base64;
 
 pub fn MainModule(role: type) type {
     const RBA = struct {
+        pub fn ListOptions(f_set: type) type {
+            return struct {
+                selected_fields: std.EnumSet(f_set),
+                where: []const u8,
+                page: usize = 1,
+                limit: usize = config.default_max_list_limit,
+            };
+        }
         pub const Global = struct { pg_pool: *pg.Pool, auth: struct { id: ?[]const u8, role: role } };
         pub const Token = struct {
             const Self = @This();
@@ -248,7 +257,19 @@ pub fn MainModule(role: type) type {
                 name: []const u8,
                 path: []const u8,
                 record_access: struct {
-                    list: struct { role: std.EnumSet(role), handler: httpz.Action(*Global) },
+                    list: struct {
+                        const HandlerOption = enum { config, getOptions, custom };
+                        role: std.EnumSet(role),
+                        handler: union(HandlerOption) {
+                            config: struct {
+                                selected_fields: std.EnumSet(Fields),
+                                where: []const u8,
+                                max_limit: usize = config.default_max_list_limit,
+                            },
+                            getOptions: *const fn (ctx: *Global, req: *Request, res: *Response) anyerror!ListOptions(Fields),
+                            custom: httpz.Action(*Global),
+                        },
+                    },
                     create: struct { role: std.EnumSet(role), handler: httpz.Action(*Global) },
                     delete: struct { accessor: std.EnumSet(Accesor), handler: httpz.Action(*Global) },
                 },
@@ -296,15 +317,92 @@ pub fn MainModule(role: type) type {
                         }
                     };
                 }
+
                 pub fn listHandler(self: Self) type {
                     return struct {
                         pub fn action(ctx: *Global, req: *Request, res: *Response) !void {
                             const user_role = ctx.auth.role;
                             const allowed = self.record_access.list.role.contains(user_role);
                             if (!allowed) return error.UNAUTHORIZED;
-                            try self.record_access.list.handler(ctx, req, res);
+                            switch (self.record_access.list.handler) {
+                                .config => |_config| try self.listAction(.{
+                                    .selected_fields = _config.selected_fields,
+                                    .where = _config.where,
+                                }, ctx, req, res),
+                                .getOptions => |getOptions| {
+                                    const options = try getOptions(ctx, req, res);
+                                    try self.listAction(options, ctx, req, res);
+                                },
+                                .custom => |custom| try custom(ctx, req, res),
+                            }
                         }
                     };
+                }
+                pub fn listAction(
+                    self: Self,
+                    options: ListOptions(Fields),
+                    ctx: *Global,
+                    req: *Request,
+                    res: *Response,
+                ) !void {
+                    const allocator = req.arena;
+                    if (options.selected_fields.bits.mask == 0) @panic("Empty selected_fields, must have aleast one");
+                    if (options.where.len == 0) @panic("[where] field is empty");
+                    const page = if (options.page < 1) 1 else options.page;
+                    const limit = if (options.limit < 1) config.default_max_list_limit else options.limit;
+                    var fields = std.ArrayList([]const u8).init(allocator);
+                    defer fields.deinit();
+                    var selected_fields_itr = options.selected_fields.iterator();
+                    while (selected_fields_itr.next()) |f| {
+                        const field_name = @tagName(f);
+                        try fields.append(field_name);
+                    }
+
+                    const conn = try ctx.pg_pool.acquire();
+                    defer conn.release();
+                    const total_count = blk: {
+                        const row = try conn.query(
+                            try std.fmt.allocPrint(req.arena, "SELECT COUNT(*)::BIGINT FROM address where {s}", .{options.where}),
+                            .{},
+                        );
+                        defer row.deinit();
+                        const row_1 = try row.next();
+                        try row.drain();
+                        break :blk row_1.?.get(i64, 0);
+                    };
+                    const fields_in_string = try std.mem.join(allocator, ",", fields.items);
+                    const results = conn.queryOpts(
+                        try std.fmt.allocPrint(req.arena, "SELECT {s} from {s} WHERE {s} limit $1 OFFSET ($2 - 1) * $1", .{ fields_in_string, self.name, options.where }),
+                        .{ limit, page },
+                        .{ .column_names = true },
+                    ) catch {
+                        if (conn.err) |pg_err| {
+                            res.status = 400;
+
+                            try res.json(.{
+                                .code = pg_err.code,
+                                .message = pg_err.message,
+                                .detail = pg_err.detail,
+                                .constraint = pg_err.constraint,
+                            }, .{});
+                        }
+                        return; // end request
+                    };
+                    defer results.deinit();
+                    var mapper = results.mapper(OptionalSchema, .{ .dupe = true });
+                    var users = std.ArrayList(OptionalSchema).init(req.arena);
+                    defer users.deinit();
+                    while (try mapper.next()) |item| {
+                        try users.append(item);
+                    }
+                    res.status = 200;
+                    try res.json(.{
+                        .page = page,
+                        .total_pages = try std.math.divCeil(f64, @as(f64, @floatFromInt(total_count)), @as(f64, @floatFromInt(limit))),
+                        .limit = limit,
+                        .total_count = total_count,
+                        .items = users.items,
+                    }, .{ .emit_null_optional_fields = false });
                 }
                 pub fn deleteHandler(self: Self) type {
                     return struct {
