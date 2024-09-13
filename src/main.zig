@@ -361,10 +361,22 @@ pub fn MainModule(role: type) type {
                     const conn = try ctx.pg_pool.acquire();
                     defer conn.release();
                     const total_count = blk: {
-                        const row = try conn.query(
+                        const row = conn.query(
                             try std.fmt.allocPrint(req.arena, "SELECT COUNT(*)::BIGINT FROM address where {s}", .{options.where}),
                             .{},
-                        );
+                        ) catch {
+                            if (conn.err) |pg_err| {
+                                res.status = 400;
+
+                                try res.json(.{
+                                    .code = pg_err.code,
+                                    .message = pg_err.message,
+                                    .detail = pg_err.detail,
+                                    .constraint = pg_err.constraint,
+                                }, .{});
+                            }
+                            return; // end request
+                        };
                         defer row.deinit();
                         const row_1 = try row.next();
                         try row.drain();
