@@ -362,7 +362,7 @@ pub fn MainModule(role: type) type {
                     defer conn.release();
                     const total_count = blk: {
                         const row = conn.query(
-                            try std.fmt.allocPrint(req.arena, "SELECT COUNT(*)::BIGINT FROM address where {s}", .{options.where}),
+                            try std.fmt.allocPrint(req.arena, "SELECT COUNT(*)::BIGINT FROM {s} where {s}", .{ self.name, options.where }),
                             .{},
                         ) catch {
                             if (conn.err) |pg_err| {
