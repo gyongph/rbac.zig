@@ -325,10 +325,17 @@ pub fn MainModule(role: type) type {
                             const allowed = self.record_access.list.role.contains(user_role);
                             if (!allowed) return error.UNAUTHORIZED;
                             switch (self.record_access.list.handler) {
-                                .config => |_config| try self.listAction(.{
-                                    .selected_fields = _config.selected_fields,
-                                    .where = _config.where,
-                                }, ctx, req, res),
+                                .config => |_config| {
+                                    const query = req.query();
+                                    const page = try std.fmt.parseInt(usize, if (query.get("page")) |page| page else "1", 10);
+                                    const limit = try std.fmt.parseInt(usize, if (query.get("limit")) |limit| limit else 10, 10);
+                                    try self.listAction(.{
+                                        .selected_fields = _config.selected_fields,
+                                        .where = _config.where,
+                                        .page = page,
+                                        .limit = limit,
+                                    }, ctx, req, res);
+                                },
                                 .getOptions => |getOptions| {
                                     const options = try getOptions(ctx, req, res);
                                     try self.listAction(options, ctx, req, res);
