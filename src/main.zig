@@ -20,7 +20,12 @@ pub fn MainModule(role: type) type {
     const RBA = struct {
         pub fn ListOptions(f_set: type) type {
             return struct {
-                selected_fields: std.EnumSet(f_set),
+                const SelectOption = enum { fields, raw };
+                const Select = union(SelectOption) {
+                    fields: std.EnumSet(f_set),
+                    raw: []const u8,
+                };
+                select: Select,
                 where: []const u8,
                 page: usize = 1,
                 limit: usize = config.default_max_list_limit,
@@ -262,7 +267,7 @@ pub fn MainModule(role: type) type {
                         role: std.EnumSet(role),
                         handler: union(HandlerOption) {
                             config: struct {
-                                selected_fields: std.EnumSet(Fields),
+                                select: ListOptions(Fields).Select,
                                 where: []const u8,
                                 max_limit: usize = config.default_max_list_limit,
                             },
@@ -353,17 +358,26 @@ pub fn MainModule(role: type) type {
                     res: *Response,
                 ) !void {
                     const allocator = req.arena;
-                    if (options.selected_fields.bits.mask == 0) @panic("Empty selected_fields, must have aleast one");
                     if (options.where.len == 0) @panic("[where] field is empty");
+                    const select = switch (options.select) {
+                        .fields => |f| {
+                            if (f.bits.mask == 0) @panic("Empty selected_fields, must have aleast one");
+                            var fields = std.ArrayList([]const u8).init(allocator);
+                            defer fields.deinit();
+                            var itr = f.iterator();
+                            while (itr.next()) |_f| {
+                                const field_name = @tagName(_f);
+                                try fields.append(field_name);
+                            }
+                            return try std.mem.join(allocator, ",", fields.items);
+                        },
+                        .raw => |f| {
+                            if (f.len == 0) @panic("[select.raw] field is empty");
+                            return f;
+                        },
+                    };
                     const page = if (options.page < 1) 1 else options.page;
                     const limit = if (options.limit < 1) config.default_max_list_limit else options.limit;
-                    var fields = std.ArrayList([]const u8).init(allocator);
-                    defer fields.deinit();
-                    var selected_fields_itr = options.selected_fields.iterator();
-                    while (selected_fields_itr.next()) |f| {
-                        const field_name = @tagName(f);
-                        try fields.append(field_name);
-                    }
 
                     const conn = try ctx.pg_pool.acquire();
                     defer conn.release();
@@ -389,9 +403,8 @@ pub fn MainModule(role: type) type {
                         try row.drain();
                         break :blk row_1.?.get(i64, 0);
                     };
-                    const fields_in_string = try std.mem.join(allocator, ",", fields.items);
                     const results = conn.queryOpts(
-                        try std.fmt.allocPrint(req.arena, "SELECT {s} from {s} WHERE {s} limit $1 OFFSET ($2 - 1) * $1", .{ fields_in_string, self.name, options.where }),
+                        try std.fmt.allocPrint(req.arena, "SELECT {s} from {s} WHERE {s} limit $1 OFFSET ($2 - 1) * $1", .{ select, self.name, options.where }),
                         .{ limit, page },
                         .{ .column_names = true },
                     ) catch {

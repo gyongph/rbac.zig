@@ -79,7 +79,7 @@ const AddressModule = main_module.Module(Address, AddressField, Accesor, null).i
             .role = RoleSet.initEmpty(),
             .handler = .{
                 .config = .{
-                    .selected_fields = AddressFieldSet.initFull(),
+                    .select = .{ .fields = AddressFieldSet.initFull() },
                     .where = "true",
                 },
             },
