@@ -37,7 +37,7 @@ pub fn MainModule(role: type) type {
             const ReturnToken = struct {
                 token: []const u8,
                 created_at: i64,
-                expirest_at: i64,
+                expires_at: i64,
             };
             const Payload = struct {
                 id: []const u8,
@@ -62,7 +62,7 @@ pub fn MainModule(role: type) type {
                 return ReturnToken{
                     .token = token,
                     .created_at = now,
-                    .expirest_at = expires_at,
+                    .expires_at = expires_at,
                 };
             }
 
