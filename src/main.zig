@@ -360,7 +360,7 @@ pub fn MainModule(role: type) type {
                     const allocator = req.arena;
                     if (options.where.len == 0) @panic("[where] field is empty");
                     const select = switch (options.select) {
-                        .fields => |f| {
+                        .fields => |f| blk: {
                             if (f.bits.mask == 0) @panic("Empty selected_fields, must have aleast one");
                             var fields = std.ArrayList([]const u8).init(allocator);
                             defer fields.deinit();
@@ -369,11 +369,11 @@ pub fn MainModule(role: type) type {
                                 const field_name = @tagName(_f);
                                 try fields.append(field_name);
                             }
-                            return try std.mem.join(allocator, ",", fields.items);
+                            break :blk try std.mem.join(allocator, ",", fields.items);
                         },
-                        .raw => |f| {
+                        .raw => |f| blk: {
                             if (f.len == 0) @panic("[select.raw] field is empty");
-                            return f;
+                            break :blk f;
                         },
                     };
                     const page = if (options.page < 1) 1 else options.page;
