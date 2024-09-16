@@ -20,8 +20,8 @@ pub fn MainModule(role: type) type {
     const RBA = struct {
         pub fn ListOptions(f_set: type) type {
             return struct {
-                const SelectOption = enum { fields, raw };
-                const Select = union(SelectOption) {
+                pub const SelectOption = enum { fields, raw };
+                pub const Select = union(SelectOption) {
                     fields: std.EnumSet(f_set),
                     raw: []const u8,
                 };
