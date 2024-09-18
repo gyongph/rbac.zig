@@ -655,24 +655,35 @@ pub fn MainModule(role: type) type {
 
                             const columns = try std.mem.join(alloc, ", ", keys);
                             defer alloc.free(columns);
-                            const get_query = try allocPrint(alloc, "SELECT {s} FROM {s} where id = '{s}'", .{ columns, self.name, id });
-                            defer alloc.free(get_query);
-                            const result = conn.queryOpts(get_query, .{}, .{ .column_names = true }) catch |err| {
-                                if (conn.err) |pg_err| {
-                                    std.log.warn("update failure: {s}", .{pg_err.message});
-                                }
-                                return err;
-                            };
-                            defer result.deinit();
-                            var mapper = result.mapper(OptionalSchema, .{ .dupe = true });
-                            const updated = try mapper.next();
-                            try res.json(updated.?, .{ .emit_null_optional_fields = false });
-                            try result.drain();
 
                             var payload = std.json.ObjectMap.init(alloc);
                             defer payload.deinit();
 
-                            print("{}\n", .{payload});
+                            const get_query = try allocPrint(alloc, "SELECT {s} FROM {s} where id = '{s}'", .{ columns, self.name, id });
+                            defer alloc.free(get_query);
+
+                            var row = try conn.rowOpts(get_query, .{}, .{ .column_names = true });
+                            defer row.?.deinit() catch {};
+                            var column_indexes: [std.meta.fields(OptionalSchema).len]?usize = undefined;
+                            inline for (std.meta.fields(OptionalSchema), 0..) |f, i| {
+                                column_indexes[i] = row.?.result.columnIndex(f.name);
+                            }
+                            inline for (std.meta.fields(OptionalSchema), column_indexes) |f, maybe_index| {
+                                if (maybe_index) |index| {
+                                    switch (f.type) {
+                                        []const u8 => try payload.put(f.name, .{ .string = row.?.get(f.type, index) }),
+                                        ?[]const u8 => try payload.put(f.name, .{ .string = row.?.get([]const u8, index) }),
+                                        else => {},
+                                    }
+                                }
+                            }
+                            var val = std.json.Value{ .object = payload };
+                            var output = std.ArrayList(u8).init(alloc);
+                            defer output.deinit();
+                            var writer_stream = std.json.writeStream(output.writer(), .{});
+                            _ = &writer_stream;
+                            try val.jsonStringify(&writer_stream);
+                            try res.json(val, .{});
                         }
                     };
                 }
