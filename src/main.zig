@@ -672,17 +672,32 @@ pub fn MainModule(role: type) type {
                                 if (maybe_index) |index| {
                                     switch (f.type) {
                                         []const u8 => try payload.put(f.name, .{ .string = row.?.get(f.type, index) }),
-                                        ?[]const u8 => try payload.put(f.name, .{ .string = row.?.get([]const u8, index) }),
+                                        i16, i32, i64 => try payload.put(f.name, .{ .integer = row.?.get(f.type, index) }),
+                                        f32, f64 => try payload.put(f.name, .{ .float = row.?.get(f.type, index) }),
+                                        bool => try payload.put(f.name, .{ .integer = row.?.get(f.type, index) }),
+                                        ?[]const u8 => {
+                                            const column_value = row.?.get(f.type, index);
+                                            if (column_value) |v| try payload.put(f.name, .{ .string = v }) else try payload.put(f.name, .{ .null = {} });
+                                        },
+                                        ?i16, ?i32, ?i64 => {
+                                            const column_value = row.?.get(f.type, index);
+                                            if (column_value) |v| try payload.put(f.name, .{ .integer = v }) else try payload.put(f.name, .{ .null = {} });
+                                        },
+                                        ?f32, ?f64 => {
+                                            const column_value = row.?.get(f.type, index);
+                                            if (column_value) |v| try payload.put(f.name, .{ .float = v }) else try payload.put(f.name, .{ .null = {} });
+                                        },
+                                        ?bool => {
+                                            const column_value = row.?.get(f.type, index);
+                                            if (column_value) |v| try payload.put(f.name, .{ .bool = v }) else try payload.put(f.name, .{ .null = {} });
+                                        },
                                         else => {},
                                     }
                                 }
                             }
-                            var val = std.json.Value{ .object = payload };
-                            var output = std.ArrayList(u8).init(alloc);
-                            defer output.deinit();
-                            var writer_stream = std.json.writeStream(output.writer(), .{});
-                            _ = &writer_stream;
-                            try val.jsonStringify(&writer_stream);
+
+                            //todo handle all array types
+                            const val = std.json.Value{ .object = payload };
                             try res.json(val, .{});
                         }
                     };
