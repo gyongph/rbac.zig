@@ -668,6 +668,11 @@ pub fn MainModule(role: type) type {
                             const updated = try mapper.next();
                             try res.json(updated.?, .{ .emit_null_optional_fields = false });
                             try result.drain();
+
+                            var payload = std.json.ObjectMap.init(alloc);
+                            defer payload.deinit();
+
+                            print("{}\n", .{payload});
                         }
                     };
                 }

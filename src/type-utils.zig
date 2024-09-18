@@ -1,5 +1,6 @@
 const std = @import("std");
 const httpz = @import("httpz");
+const pg = @import("pg");
 const testing = std.testing;
 const mem = std.mem;
 
@@ -60,10 +61,11 @@ pub fn Partial(comptime str: type) type {
 
     var fields: [real_struct.fields.len]std.builtin.Type.StructField = undefined;
     inline for (real_struct.fields, 0..) |field, i| {
-        const b: ?field.type = null;
+        const t = if (@typeInfo(field.type) == .Optional) field.type else ?field.type;
+        const b: t = null;
         fields[i] = .{
             .name = field.name,
-            .type = @Type(.{ .Optional = .{ .child = field.type } }),
+            .type = t,
             .default_value = @as(*const anyopaque, @ptrCast(&b)),
             .is_comptime = false,
             .alignment = 0,
