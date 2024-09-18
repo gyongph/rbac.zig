@@ -556,55 +556,85 @@ pub fn MainModule(role: type) type {
                             const values = selected_fields.values();
                             const keys = selected_fields.keys();
 
-                            const query: []const u8 = blk: {
-                                var q: []const u8 = try allocPrint(alloc, "UPDATE {s} SET ", .{self.name});
-                                defer alloc.free(q);
-                                var first = true;
+                            const args: []const u8 = blk: {
+                                var _args = std.ArrayList([]const u8).init(alloc);
+                                defer _args.deinit();
                                 for (keys, 0..) |field_name, i| {
                                     const field_tag = std.meta.stringToEnum(Fields, field_name);
                                     if (field_tag == null) {
                                         res.status = 400;
-                                        res.body = try allocPrint(alloc, "Trying to update an unknown field: {s}", .{field_name});
-                                        alloc.free(q);
+                                        try res.json(.{
+                                            .code = 400,
+                                            .message = "Invalid payload",
+                                            .details = try allocPrint(alloc, "Trying to update an unknown field: {s}", .{field_name}),
+                                        }, .{});
                                         return;
                                     }
-                                    if (update_access.contains(field_tag.?)) {
-                                        const string_val = try std.json.stringifyAlloc(alloc, values[i], .{});
-                                        defer alloc.free(string_val);
-                                        const count = std.fmt.count("{s}, {s} = '{s}' ", .{ q, field_name, string_val });
-                                        const buf = try alloc.alloc(u8, count);
-                                        const new_query = switch (values[i]) {
-                                            .string => |v| if (first) try std.fmt.bufPrintZ(buf, "{s} {s} = '{s}' ", .{ q, field_name, v }) else try std.fmt.bufPrint(buf, "{s} , {s} = '{s}' ", .{ q, field_name, v }),
-                                            .integer => |v| if (first) try std.fmt.bufPrintZ(buf, "{s} {s} = {} ", .{ q, field_name, v }) else try std.fmt.bufPrint(buf, "{s} , {s} = {} ", .{ q, field_name, v }),
-                                            .bool => |v| if (first) try std.fmt.bufPrint(buf, "{s} {s} = {} ", .{ q, field_name, v }) else try std.fmt.bufPrint(buf, "{s} , {s} = {} ", .{ q, field_name, v }),
-                                            .float => |v| if (first) try std.fmt.bufPrint(buf, "{s} {s} = {d} ", .{ q, field_name, v }) else try std.fmt.bufPrint(buf, "{s} , {s} = {d} ", .{ q, field_name, v }),
-                                            else => q,
-                                        };
-                                        if (first) first = false;
-                                        alloc.free(q);
-                                        q = try alloc.dupe(u8, new_query);
-                                        alloc.free(buf);
-                                    } else {
+                                    if (!update_access.contains(field_tag.?)) {
                                         res.status = 401;
-                                        const detail = try allocPrint(alloc, "Updating {s} field is not included in your permission.", .{field_name});
                                         try res.json(.{
                                             .code = 401,
                                             .message = "UNAUTHORIZED",
-                                            .detail = detail,
+                                            .detail = try allocPrint(alloc, "Updating {s} field is not included in your permission.", .{field_name}),
                                         }, .{});
-                                        alloc.free(detail);
-                                        alloc.free(q);
+                                    }
+
+                                    const insert_args: ?[]const u8 = switch (values[i]) {
+                                        .string => |v| try allocPrint(alloc, " {s} = '{s}'", .{ field_name, v }),
+                                        .integer => |v| try allocPrint(alloc, " {s} = {d} ", .{ field_name, v }),
+                                        .float => |v| try allocPrint(alloc, " {s} = {d} ", .{ field_name, v }),
+                                        .array => |arr| array_blk: {
+                                            const items = arr.items;
+                                            if (items.len == 0) break :blk try allocPrint(alloc, "{s} = '{{}}'", .{field_name});
+                                            var array_type_field = std.ArrayList([]const u8).init(alloc);
+                                            defer array_type_field.deinit();
+                                            for (items) |v| {
+                                                const array_value = switch (v) {
+                                                    .string => try allocPrint(alloc, " '{s}' ", .{v.string}),
+                                                    .integer => try allocPrint(alloc, " '{d}' ", .{v.integer}),
+                                                    .float => try allocPrint(alloc, " '{d}' ", .{v.float}),
+                                                    else => null,
+                                                };
+                                                if (array_value == null) {
+                                                    res.status = 400;
+                                                    try res.json(.{
+                                                        .code = 400,
+                                                        .message = "Bad request",
+                                                        .details = try allocPrint(alloc, "Found unsupported data type in array {s}", .{field_name}),
+                                                    }, .{});
+                                                    return;
+                                                }
+                                                try array_type_field.append(array_value.?);
+                                            }
+
+                                            // this is so complicated and unnecceeessssaryyyyyyy!!
+                                            break :array_blk try allocPrint(alloc, " {s} = ARRAY({s}) ", .{ field_name, try std.mem.join(alloc, " , ", array_type_field.items) });
+                                        },
+                                        else => null,
+                                    };
+
+                                    if (insert_args == null) {
+                                        res.status = 400;
+                                        try res.json(.{
+                                            .code = 400,
+                                            .message = "Bad request",
+                                            .details = "Found unsupported data type",
+                                        }, .{});
                                         return;
                                     }
-                                }
-                                break :blk try allocPrint(alloc, "{s} WHERE id = '{s}';", .{ q, id });
-                            };
 
-                            defer alloc.free(query);
+                                    try _args.append(insert_args.?);
+                                }
+                                break :blk try std.mem.join(alloc, " , ", _args.items);
+                            };
 
                             const conn = try ctx.pg_pool.acquire();
                             defer conn.release();
-                            const affected = conn.exec(query, .{}) catch |err| {
+                            const affected = conn.exec(try allocPrint(alloc, "update {s} set {s} where id = '{s}'", .{
+                                self.name,
+                                args,
+                                id,
+                            }), .{}) catch |err| {
                                 if (conn.err) |pg_err| {
                                     res.status = 400;
                                     try res.json(.{
