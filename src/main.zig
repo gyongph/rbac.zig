@@ -578,63 +578,55 @@ pub fn MainModule(role: type) type {
                                             .detail = try allocPrint(alloc, "Updating {s} field is not included in your permission.", .{field_name}),
                                         }, .{});
                                     }
-
-                                    const insert_args: ?[]const u8 = switch (values[i]) {
-                                        .string => |v| try allocPrint(alloc, " {s} = '{s}'", .{ field_name, v }),
-                                        .integer => |v| try allocPrint(alloc, " {s} = {d} ", .{ field_name, v }),
-                                        .float => |v| try allocPrint(alloc, " {s} = {d} ", .{ field_name, v }),
-                                        .array => |arr| array_blk: {
-                                            const items = arr.items;
-                                            if (items.len == 0) break :blk try allocPrint(alloc, "{s} = '{{}}'", .{field_name});
-                                            var array_type_field = std.ArrayList([]const u8).init(alloc);
-                                            defer array_type_field.deinit();
-                                            for (items) |v| {
-                                                const array_value = switch (v) {
-                                                    .string => try allocPrint(alloc, " '{s}' ", .{v.string}),
-                                                    .integer => try allocPrint(alloc, " '{d}' ", .{v.integer}),
-                                                    .float => try allocPrint(alloc, " '{d}' ", .{v.float}),
-                                                    else => null,
-                                                };
-                                                if (array_value == null) {
-                                                    res.status = 400;
-                                                    try res.json(.{
-                                                        .code = 400,
-                                                        .message = "Bad request",
-                                                        .details = try allocPrint(alloc, "Found unsupported data type in array {s}", .{field_name}),
-                                                    }, .{});
-                                                    return;
-                                                }
-                                                try array_type_field.append(array_value.?);
-                                            }
-
-                                            // this is so complicated and unnecceeessssaryyyyyyy!!
-                                            break :array_blk try allocPrint(alloc, " {s} = ARRAY({s}) ", .{ field_name, try std.mem.join(alloc, " , ", array_type_field.items) });
-                                        },
-                                        else => null,
-                                    };
-
-                                    if (insert_args == null) {
-                                        res.status = 400;
-                                        try res.json(.{
-                                            .code = 400,
-                                            .message = "Bad request",
-                                            .details = "Found unsupported data type",
-                                        }, .{});
-                                        return;
-                                    }
-
-                                    try _args.append(insert_args.?);
+                                    const set_args = try allocPrint(alloc, " {s} = ${d}", .{ field_name, i + 1 });
+                                    try _args.append(set_args);
                                 }
                                 break :blk try std.mem.join(alloc, " , ", _args.items);
                             };
 
                             const conn = try ctx.pg_pool.acquire();
                             defer conn.release();
-                            const affected = conn.exec(try allocPrint(alloc, "update {s} set {s} where id = '{s}'", .{
-                                self.name,
-                                args,
-                                id,
-                            }), .{}) catch |err| {
+                            const query_args = try std.mem.concat(
+                                alloc,
+                                u8,
+                                &.{
+                                    try allocPrint(alloc, "update {s} set ", .{self.name}), // update operation
+                                    args,
+                                    try allocPrint(alloc, " where id = ${d}", .{values.len + 1}), //where,
+                                },
+                            );
+                            var stmt = try pg.Stmt.init(conn, .{});
+                            errdefer stmt.deinit();
+                            stmt.prepare(query_args) catch |err| {
+                                if (conn.err) |pg_err| {
+                                    res.status = 400;
+                                    try res.json(.{
+                                        .code = pg_err.code,
+                                        .message = pg_err.message,
+                                        .detail = pg_err.detail,
+                                        .constraint = pg_err.constraint,
+                                    }, .{});
+                                    std.log.warn("faile prepa: {s}", .{pg_err.message});
+                                }
+                                print("{}\n", .{err});
+                                return;
+                            };
+                            for (values) |v| {
+                                switch (v) {
+                                    .string => |_v| try stmt.bind(_v),
+                                    .integer => |_v| try stmt.bind(_v),
+                                    .float => |_v| try stmt.bind(_v),
+                                    .bool => |_v| try stmt.bind(_v),
+                                    else => {
+                                        res.status = 400;
+                                        res.body = "bad resust";
+                                        return;
+                                    },
+                                }
+                            }
+                            try stmt.bind(id);
+
+                            _ = stmt.execute() catch |err| {
                                 if (conn.err) |pg_err| {
                                     res.status = 400;
                                     try res.json(.{
@@ -648,57 +640,36 @@ pub fn MainModule(role: type) type {
                                 print("{}\n", .{err});
                                 return;
                             };
-                            if (affected == 0) {
-                                res.status = 404;
-                                return;
-                            }
 
                             const columns = try std.mem.join(alloc, ", ", keys);
                             defer alloc.free(columns);
 
-                            var payload = std.json.ObjectMap.init(alloc);
-                            defer payload.deinit();
-
                             const get_query = try allocPrint(alloc, "SELECT {s} FROM {s} where id = '{s}'", .{ columns, self.name, id });
                             defer alloc.free(get_query);
 
-                            var row = try conn.rowOpts(get_query, .{}, .{ .column_names = true });
-                            defer row.?.deinit() catch {};
-                            var column_indexes: [std.meta.fields(OptionalSchema).len]?usize = undefined;
-                            inline for (std.meta.fields(OptionalSchema), 0..) |f, i| {
-                                column_indexes[i] = row.?.result.columnIndex(f.name);
-                            }
-                            inline for (std.meta.fields(OptionalSchema), column_indexes) |f, maybe_index| {
-                                if (maybe_index) |index| {
-                                    switch (f.type) {
-                                        []const u8 => try payload.put(f.name, .{ .string = row.?.get(f.type, index) }),
-                                        i16, i32, i64 => try payload.put(f.name, .{ .integer = row.?.get(f.type, index) }),
-                                        f32, f64 => try payload.put(f.name, .{ .float = row.?.get(f.type, index) }),
-                                        bool => try payload.put(f.name, .{ .integer = row.?.get(f.type, index) }),
-                                        ?[]const u8 => {
-                                            const column_value = row.?.get(f.type, index);
-                                            if (column_value) |v| try payload.put(f.name, .{ .string = v }) else try payload.put(f.name, .{ .null = {} });
-                                        },
-                                        ?i16, ?i32, ?i64 => {
-                                            const column_value = row.?.get(f.type, index);
-                                            if (column_value) |v| try payload.put(f.name, .{ .integer = v }) else try payload.put(f.name, .{ .null = {} });
-                                        },
-                                        ?f32, ?f64 => {
-                                            const column_value = row.?.get(f.type, index);
-                                            if (column_value) |v| try payload.put(f.name, .{ .float = v }) else try payload.put(f.name, .{ .null = {} });
-                                        },
-                                        ?bool => {
-                                            const column_value = row.?.get(f.type, index);
-                                            if (column_value) |v| try payload.put(f.name, .{ .bool = v }) else try payload.put(f.name, .{ .null = {} });
-                                        },
-                                        else => {},
-                                    }
+                            const get_conn = try ctx.pg_pool.acquire();
+                            defer get_conn.release();
+                            var row = get_conn.rowOpts(get_query, .{}, .{
+                                .allocator = req.arena,
+                                .column_names = true,
+                            }) catch |err| {
+                                if (conn.err) |pg_err| {
+                                    res.status = 400;
+                                    try res.json(.{
+                                        .code = pg_err.code,
+                                        .message = pg_err.message,
+                                        .detail = pg_err.detail,
+                                        .constraint = pg_err.constraint,
+                                    }, .{});
+                                    std.log.warn("update failure: {s}", .{pg_err.message});
                                 }
-                            }
+                                print("{}\n", .{err});
+                                return;
+                            };
 
-                            //todo handle all array types
-                            const val = std.json.Value{ .object = payload };
-                            try res.json(val, .{});
+                            defer row.?.deinit() catch {};
+                            const payload = my_mapper(OptionalSchema, row.?);
+                            try res.json(payload, .{ .emit_null_optional_fields = false });
                         }
                     };
                 }
@@ -707,3 +678,24 @@ pub fn MainModule(role: type) type {
     };
     return RBA;
 }
+fn my_mapper(s: type, row: pg.QueryRow) s {
+    var column_indexes: [std.meta.fields(s).len]?usize = undefined;
+    var value: s = undefined;
+    inline for (std.meta.fields(s), 0..) |f, i| {
+        column_indexes[i] = row.result.columnIndex(f.name);
+    }
+    inline for (std.meta.fields(s), column_indexes) |f, optional_column_index| {
+        if (optional_column_index) |idx| {
+            @field(value, f.name) = row.get(f.type, idx);
+        } else if (f.default_value) |dflt| {
+            @field(value, f.name) = @as(*align(1) const f.type, @ptrCast(dflt)).*;
+        } else {
+            return error.FieldColumnMismatch;
+        }
+    }
+    return value;
+}
+
+const Mapper = struct {
+    result: pg.Result,
+};
