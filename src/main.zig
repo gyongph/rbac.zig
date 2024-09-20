@@ -578,14 +578,15 @@ pub fn MainModule(role: type) type {
                                         }, .{});
                                     }
                                     const set_args: ?[]const u8 = switch (values[i]) {
-                                        .string, .integer, .float, .null => try allocPrint(alloc, " {s} = ${d}", .{ field_name, i + 1 }),
+                                        .string, .integer, .float, .null => try allocPrint(alloc, " {s} = ${d} ", .{ field_name, i + 1 }),
                                         .bool => try allocPrint(alloc, " {s} = ${d}::bool", .{ field_name, i + 1 }),
                                         .array => |arr| arr_blk: {
-                                            if (arr.items.len == 0) break :arr_blk try allocPrint(alloc, "{s} = {{}}", .{field_name});
+                                            if (arr.items.len == 0) break :arr_blk try allocPrint(alloc, "{s} = {{}} ", .{field_name});
                                             switch (arr.items[0]) {
-                                                .string => {},
-                                                .integer, .float => {},
-                                                .bool => {},
+                                                .string => break :arr_blk try allocPrint(alloc, " {s} = ${d}::TEXT[] ", .{ field_name, i + 1 }),
+                                                .integer => break :arr_blk try allocPrint(alloc, " {s} = ${d}::BIGINT[] ", .{ field_name, i + 1 }),
+                                                .float => break :arr_blk try allocPrint(alloc, " {s} = ${d}::FLOAT[] ", .{ field_name, i + 1 }),
+                                                .bool => break :arr_blk try allocPrint(alloc, " {s} = ${d}::BOOLEAN[] ", .{ field_name, i + 1 }),
                                                 else => {
                                                     try res.json(.{
                                                         .code = 400,
@@ -612,7 +613,6 @@ pub fn MainModule(role: type) type {
                                 }
                                 break :blk try std.mem.join(alloc, " , ", _args.items);
                             };
-
                             const conn = try ctx.pg_pool.acquire();
                             defer conn.release();
                             const query_args = try std.mem.concat(
@@ -647,7 +647,41 @@ pub fn MainModule(role: type) type {
                                     .float => |_v| try stmt.bind(_v),
                                     .bool => |_v| try stmt.bind(_v),
                                     .null => try stmt.bind(null),
-                                    .array => {},
+                                    .array => |_v| {
+                                        if (_v.items.len > 0) {
+                                            switch (_v.items[0]) {
+                                                .string => {
+                                                    var items = std.ArrayList([]const u8).init(alloc);
+                                                    for (_v.items) |val| {
+                                                        if (val == .string) try items.append(val.string);
+                                                    }
+                                                    try stmt.bind(try items.toOwnedSlice());
+                                                },
+                                                .bool => {
+                                                    var items = std.ArrayList(bool).init(alloc);
+                                                    for (_v.items) |val| {
+                                                        if (val == .bool) try items.append(val.bool);
+                                                    }
+                                                    try stmt.bind(try items.toOwnedSlice());
+                                                },
+                                                .float => {
+                                                    var items = std.ArrayList(f64).init(alloc);
+                                                    for (_v.items) |val| {
+                                                        if (val == .float) try items.append(val.float);
+                                                    }
+                                                    try stmt.bind(try items.toOwnedSlice());
+                                                },
+                                                .integer => {
+                                                    var items = std.ArrayList(i64).init(alloc);
+                                                    for (_v.items) |val| {
+                                                        if (val == .integer) try items.append(val.integer);
+                                                    }
+                                                    try stmt.bind(try items.toOwnedSlice());
+                                                },
+                                                else => {},
+                                            }
+                                        }
+                                    },
                                     else => {
                                         res.status = 400;
                                         res.body = "Unable to bin";
@@ -671,6 +705,7 @@ pub fn MainModule(role: type) type {
                                 print("{}\n", .{err});
                                 return;
                             };
+                            std.log.info("DB QUERY: {s}", .{query_args});
 
                             const columns = try std.mem.join(alloc, ", ", keys);
                             defer alloc.free(columns);
@@ -718,22 +753,23 @@ fn my_mapper(alloc: std.mem.Allocator, s: type, row: pg.Row) !s {
     inline for (std.meta.fields(s), column_indexes) |f, optional_column_index| {
         if (optional_column_index) |idx| {
             switch (f.type) {
-                []const u8 => @field(value, f.name) = row.get([]const u8, idx),
-                []u8 => @field(value, f.name) = row.get([]u8, idx),
-                i16 => @field(value, f.name) = row.get(i16, idx),
-                i32 => @field(value, f.name) = row.get(i32, idx),
-                i64 => @field(value, f.name) = row.get(i64, idx),
-                f32 => @field(value, f.name) = row.get(f32, idx),
-                f64 => @field(value, f.name) = row.get(f64, idx),
-                bool => @field(value, f.name) = row.get(bool, idx),
-                ?[]const u8 => @field(value, f.name) = row.get(?[]const u8, idx),
-                ?[]u8 => @field(value, f.name) = row.get(?[]u8, idx),
-                ?i16 => @field(value, f.name) = row.get(?i16, idx),
-                ?i32 => @field(value, f.name) = row.get(?i32, idx),
-                ?i64 => @field(value, f.name) = row.get(?i64, idx),
-                ?f32 => @field(value, f.name) = row.get(?f32, idx),
-                ?f64 => @field(value, f.name) = row.get(?f64, idx),
-                ?bool => @field(value, f.name) = row.get(?bool, idx),
+                []const u8,
+                []u8,
+                i16,
+                i32,
+                i64,
+                f32,
+                f64,
+                bool,
+                ?[]const u8,
+                ?[]u8,
+                ?i16,
+                ?i32,
+                ?i64,
+                ?f32,
+                ?f64,
+                ?bool,
+                => @field(value, f.name) = row.get(f.type, idx),
 
                 [][]const u8,
                 [][]u8,
@@ -770,9 +806,7 @@ fn my_mapper(alloc: std.mem.Allocator, s: type, row: pg.Row) !s {
                     @field(value, f.name) = try list.toOwnedSlice();
                 },
                 else => {
-                    if (f.default_value) |dflt| {
-                        @field(value, f.name) = @as(*align(1) const f.type, @ptrCast(dflt)).*;
-                    } else return error.FieldColumnMismatch;
+                    @compileError(@typeName(s) ++ " " ++ f.name ++ " field type is not supported: " ++ @typeName(f.type));
                 },
             }
         } else if (f.default_value) |dflt| {
