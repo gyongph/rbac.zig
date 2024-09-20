@@ -361,7 +361,7 @@ pub fn MainModule(role: type) type {
                     if (options.where.len == 0) @panic("[where] field is empty");
                     const select = switch (options.select) {
                         .fields => |f| blk: {
-                            if (f.bits.mask == 0) @panic("Empty selected_fields, must have aleast one");
+                            if (f.bits.mask == 0) @panic("Empty selected_fields, must have at least one");
                             var fields = std.ArrayList([]const u8).init(allocator);
                             defer fields.deinit();
                             var itr = f.iterator();
@@ -421,11 +421,11 @@ pub fn MainModule(role: type) type {
                         return; // end request
                     };
                     defer results.deinit();
-                    var mapper = results.mapper(OptionalSchema, .{ .dupe = true });
                     var users = std.ArrayList(OptionalSchema).init(req.arena);
                     defer users.deinit();
-                    while (try mapper.next()) |item| {
-                        try users.append(item);
+                    while (try results.next()) |row| {
+                        const user = try my_mapper(allocator, OptionalSchema, row);
+                        try users.append(user);
                     }
                     res.status = 200;
                     try res.json(.{
@@ -513,14 +513,13 @@ pub fn MainModule(role: type) type {
                                 return err;
                             };
                             defer result.deinit();
-                            var mapper = result.mapper(OptionalSchema, .{ .dupe = true });
-                            const item = try mapper.next();
-                            if (item == null) {
-                                res.status = 404;
-                            } else {
-                                try res.json(item.?, .{ .emit_null_optional_fields = false });
-                                try result.drain();
+                            const row = try result.next();
+                            if (row == null) {
+                                res.status = 400;
+                                return;
                             }
+                            const data = try my_mapper(alloc, OptionalSchema, row.?);
+                            try res.json(data, .{ .emit_null_optional_fields = false });
                         }
                     };
                 }
@@ -530,7 +529,7 @@ pub fn MainModule(role: type) type {
                             const alloc = req.arena;
                             const id = req.param(self.name ++ "_id").?;
                             const type_info = @typeInfo(@TypeOf(self.field_access));
-                            assert(type_info == .Struct, "Expectes struct type but found " ++ @typeName(@TypeOf(self.field_access)));
+                            assert(type_info == .Struct, "Expects struct type but found " ++ @typeName(@TypeOf(self.field_access)));
                             const accessor = try self.getAccessor(ctx, req, res);
                             if (accessor == null) return error.UNAUTHORIZED;
                             const accessor_name = @tagName(accessor.?);
@@ -578,8 +577,38 @@ pub fn MainModule(role: type) type {
                                             .detail = try allocPrint(alloc, "Updating {s} field is not included in your permission.", .{field_name}),
                                         }, .{});
                                     }
-                                    const set_args = try allocPrint(alloc, " {s} = ${d}", .{ field_name, i + 1 });
-                                    try _args.append(set_args);
+                                    const set_args: ?[]const u8 = switch (values[i]) {
+                                        .string, .integer, .float, .null => try allocPrint(alloc, " {s} = ${d}", .{ field_name, i + 1 }),
+                                        .bool => try allocPrint(alloc, " {s} = ${d}::bool", .{ field_name, i + 1 }),
+                                        .array => |arr| arr_blk: {
+                                            if (arr.items.len == 0) break :arr_blk try allocPrint(alloc, "{s} = {{}}", .{field_name});
+                                            switch (arr.items[0]) {
+                                                .string => {},
+                                                .integer, .float => {},
+                                                .bool => {},
+                                                else => {
+                                                    try res.json(.{
+                                                        .code = 400,
+                                                        .message = "Invalid payload",
+                                                        .details = try allocPrint(alloc, "The {s} field has an unsupported data type", .{field_name}),
+                                                    }, .{});
+                                                    return;
+                                                },
+                                            }
+                                            break :arr_blk null;
+                                        },
+                                        else => null,
+                                    };
+                                    if (set_args == null) {
+                                        res.status = 400;
+                                        try res.json(.{
+                                            .code = 400,
+                                            .message = "Invalid paylo1ad",
+                                            .details = try allocPrint(alloc, "The {s} field has an unsupported data type", .{field_name}),
+                                        }, .{});
+                                        return;
+                                    }
+                                    try _args.append(set_args.?);
                                 }
                                 break :blk try std.mem.join(alloc, " , ", _args.items);
                             };
@@ -606,7 +635,7 @@ pub fn MainModule(role: type) type {
                                         .detail = pg_err.detail,
                                         .constraint = pg_err.constraint,
                                     }, .{});
-                                    std.log.warn("faile prepa: {s}", .{pg_err.message});
+                                    std.log.warn("Failed stmt preparation: {s}", .{pg_err.message});
                                 }
                                 print("{}\n", .{err});
                                 return;
@@ -617,9 +646,11 @@ pub fn MainModule(role: type) type {
                                     .integer => |_v| try stmt.bind(_v),
                                     .float => |_v| try stmt.bind(_v),
                                     .bool => |_v| try stmt.bind(_v),
+                                    .null => try stmt.bind(null),
+                                    .array => {},
                                     else => {
                                         res.status = 400;
-                                        res.body = "bad resust";
+                                        res.body = "Unable to bin";
                                         return;
                                     },
                                 }
@@ -649,7 +680,7 @@ pub fn MainModule(role: type) type {
 
                             const get_conn = try ctx.pg_pool.acquire();
                             defer get_conn.release();
-                            var row = get_conn.rowOpts(get_query, .{}, .{
+                            var query_row = get_conn.rowOpts(get_query, .{}, .{
                                 .allocator = req.arena,
                                 .column_names = true,
                             }) catch |err| {
@@ -667,8 +698,8 @@ pub fn MainModule(role: type) type {
                                 return;
                             };
 
-                            defer row.?.deinit() catch {};
-                            const payload = my_mapper(OptionalSchema, row.?);
+                            defer query_row.?.deinit() catch {};
+                            const payload = try my_mapper(alloc, OptionalSchema, query_row.?.row);
                             try res.json(payload, .{ .emit_null_optional_fields = false });
                         }
                     };
@@ -678,15 +709,72 @@ pub fn MainModule(role: type) type {
     };
     return RBA;
 }
-fn my_mapper(s: type, row: pg.QueryRow) s {
+fn my_mapper(alloc: std.mem.Allocator, s: type, row: pg.Row) !s {
     var column_indexes: [std.meta.fields(s).len]?usize = undefined;
     var value: s = undefined;
     inline for (std.meta.fields(s), 0..) |f, i| {
-        column_indexes[i] = row.result.columnIndex(f.name);
+        column_indexes[i] = row._result.columnIndex(f.name);
     }
     inline for (std.meta.fields(s), column_indexes) |f, optional_column_index| {
         if (optional_column_index) |idx| {
-            @field(value, f.name) = row.get(f.type, idx);
+            switch (f.type) {
+                []const u8 => @field(value, f.name) = row.get([]const u8, idx),
+                []u8 => @field(value, f.name) = row.get([]u8, idx),
+                i16 => @field(value, f.name) = row.get(i16, idx),
+                i32 => @field(value, f.name) = row.get(i32, idx),
+                i64 => @field(value, f.name) = row.get(i64, idx),
+                f32 => @field(value, f.name) = row.get(f32, idx),
+                f64 => @field(value, f.name) = row.get(f64, idx),
+                bool => @field(value, f.name) = row.get(bool, idx),
+                ?[]const u8 => @field(value, f.name) = row.get(?[]const u8, idx),
+                ?[]u8 => @field(value, f.name) = row.get(?[]u8, idx),
+                ?i16 => @field(value, f.name) = row.get(?i16, idx),
+                ?i32 => @field(value, f.name) = row.get(?i32, idx),
+                ?i64 => @field(value, f.name) = row.get(?i64, idx),
+                ?f32 => @field(value, f.name) = row.get(?f32, idx),
+                ?f64 => @field(value, f.name) = row.get(?f64, idx),
+                ?bool => @field(value, f.name) = row.get(?bool, idx),
+
+                [][]const u8,
+                [][]u8,
+                []i16,
+                []i32,
+                []i64,
+                []f32,
+                []f64,
+                []bool,
+                => {
+                    const t = @typeInfo(f.type).Pointer.child;
+                    var list = std.ArrayList(t).init(alloc);
+                    var itr = row.get(pg.Iterator(t), idx);
+                    while (itr.next()) |data| {
+                        try list.append(data);
+                    }
+                    @field(value, f.name) = try list.toOwnedSlice();
+                },
+                ?[][]const u8,
+                ?[][]u8,
+                ?[]i16,
+                ?[]i32,
+                ?[]i64,
+                ?[]f32,
+                ?[]f64,
+                ?[]bool,
+                => {
+                    const t = @typeInfo(@typeInfo(f.type).Optional.child).Pointer.child;
+                    var list = std.ArrayList(t).init(alloc);
+                    var itr = row.get(pg.Iterator(t), idx);
+                    while (itr.next()) |data| {
+                        try list.append(data);
+                    }
+                    @field(value, f.name) = try list.toOwnedSlice();
+                },
+                else => {
+                    if (f.default_value) |dflt| {
+                        @field(value, f.name) = @as(*align(1) const f.type, @ptrCast(dflt)).*;
+                    } else return error.FieldColumnMismatch;
+                },
+            }
         } else if (f.default_value) |dflt| {
             @field(value, f.name) = @as(*align(1) const f.type, @ptrCast(dflt)).*;
         } else {
@@ -695,7 +783,3 @@ fn my_mapper(s: type, row: pg.QueryRow) s {
     }
     return value;
 }
-
-const Mapper = struct {
-    result: pg.Result,
-};
