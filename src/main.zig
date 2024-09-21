@@ -45,7 +45,7 @@ pub fn MainModule(role: type) type {
                 created_at: i64,
                 expires_at: i64,
             };
-            const token_data_separator = "‎"; // empty space
+            const token_data_separator = "‎:"; // empty space
 
             /// requires an arena allocator to free all at once \
             /// expires_at is in minutes
@@ -73,6 +73,7 @@ pub fn MainModule(role: type) type {
 
                 var salt = [_]u8{undefined} ** 64;
                 random.bytes(&salt);
+
                 const hash_payload = try std.mem.concat(alloc, u8, &.{ &salt, stream.items, secret });
                 var signature = [_]u8{undefined} ** 64;
                 try sha512.hash(hash_payload, &signature);
@@ -89,7 +90,7 @@ pub fn MainModule(role: type) type {
             pub fn parse(allocator: std.mem.Allocator, token: []const u8, secret: []const u8) !Payload {
                 const now = std.time.milliTimestamp();
                 const raw_buf = try base64.decode(allocator, token);
-                var token_parts = std.mem.split(u8, raw_buf, token_data_separator);
+                var token_parts = std.mem.splitSequence(u8, raw_buf, token_data_separator);
                 const random_bytes = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
                 const payload = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
                 const signature = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
@@ -153,7 +154,7 @@ pub fn MainModule(role: type) type {
                 const sub_info = @typeInfo(@TypeOf(sub));
                 if (sub_info == .Pointer) {
                     const child_info = @typeInfo(sub_info.Pointer.child);
-                    if (child_info == .Struct and child_info.Struct.is_tuple == true) {
+                    if (child_info == .@"struct" and child_info.@"struct".is_tuple == true) {
                         inline for (sub.*) |mod| {
                             try self.registerModule(path ++ id_param, &mod);
                         }
@@ -172,7 +173,7 @@ pub fn MainModule(role: type) type {
                     global.auth.role = .Guest;
                 } else {
                     const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
-                    var itr = std.mem.split(u8, bearer_token.?, " ");
+                    var itr = std.mem.splitScalar(u8, bearer_token.?, " ");
                     _ = itr.next();
                     const maybe_token = itr.next();
                     if (maybe_token) |token| {
@@ -421,11 +422,11 @@ pub fn MainModule(role: type) type {
                         return; // end request
                     };
                     defer results.deinit();
-                    var users = std.ArrayList(OptionalSchema).init(req.arena);
-                    defer users.deinit();
-                    while (try results.next()) |row| {
-                        const user = try my_mapper(allocator, OptionalSchema, row);
-                        try users.append(user);
+                    const mapper = results.mapper(OptionalSchema, .{ .allocator = allocator, .dupe = true });
+                    var list = std.ArrayList(OptionalSchema).init(req.arena);
+                    defer list.deinit();
+                    while (try mapper.next()) |item| {
+                        try list.append(item);
                     }
                     res.status = 200;
                     try res.json(.{
@@ -433,7 +434,7 @@ pub fn MainModule(role: type) type {
                         .total_pages = try std.math.divCeil(f64, @as(f64, @floatFromInt(total_count)), @as(f64, @floatFromInt(limit))),
                         .limit = limit,
                         .total_count = total_count,
-                        .items = users.items,
+                        .items = list.items,
                     }, .{ .emit_null_optional_fields = false });
                 }
                 pub fn deleteHandler(self: Self) type {
@@ -456,11 +457,11 @@ pub fn MainModule(role: type) type {
                             const alloc = req.arena;
                             const id = req.param(self.name ++ "_id").?;
                             const type_info = @typeInfo(@TypeOf(self.field_access));
-                            assert(type_info == .Struct, "Expects struct but found" ++ @typeName(@TypeOf(self.field_access)));
+                            assert(type_info == .@"struct", "Expects struct but found" ++ @typeName(@TypeOf(self.field_access)));
                             const accessor = try self.getAccessor(ctx, req, res);
                             if (accessor == null) return error.UNAUTHORIZED;
                             const accessor_name = @tagName(accessor.?);
-                            const field_access_fields = type_info.Struct.fields;
+                            const field_access_fields = type_info.@"struct".fields;
 
                             const maybe_read_access: ?std.EnumSet(Fields) = blk: {
                                 inline for (field_access_fields) |f| {
@@ -518,7 +519,7 @@ pub fn MainModule(role: type) type {
                                 res.status = 400;
                                 return;
                             }
-                            const data = try my_mapper(alloc, OptionalSchema, row.?);
+                            const data = try row.?.to(OptionalSchema, .{ .allocator = alloc, .dupe = true });
                             try res.json(data, .{ .emit_null_optional_fields = false });
                         }
                     };
@@ -529,11 +530,11 @@ pub fn MainModule(role: type) type {
                             const alloc = req.arena;
                             const id = req.param(self.name ++ "_id").?;
                             const type_info = @typeInfo(@TypeOf(self.field_access));
-                            assert(type_info == .Struct, "Expects struct type but found " ++ @typeName(@TypeOf(self.field_access)));
+                            assert(type_info == .@"struct", "Expects struct type but found " ++ @typeName(@TypeOf(self.field_access)));
                             const accessor = try self.getAccessor(ctx, req, res);
                             if (accessor == null) return error.UNAUTHORIZED;
                             const accessor_name = @tagName(accessor.?);
-                            const field_access_fields = type_info.Struct.fields;
+                            const field_access_fields = type_info.@"struct".fields;
 
                             const maybe_update_access: ?std.EnumSet(Fields) = blk: {
                                 inline for (field_access_fields) |f| {
@@ -554,6 +555,7 @@ pub fn MainModule(role: type) type {
                             const selected_fields = maybe_payload.?;
                             const values = selected_fields.values();
                             const keys = selected_fields.keys();
+                            var update_arg_count: usize = 0;
 
                             const args: []const u8 = blk: {
                                 var _args = std.ArrayList([]const u8).init(alloc);
@@ -578,25 +580,22 @@ pub fn MainModule(role: type) type {
                                         }, .{});
                                     }
                                     const set_args: ?[]const u8 = switch (values[i]) {
-                                        .string, .integer, .float, .null => try allocPrint(alloc, " {s} = ${d} ", .{ field_name, i + 1 }),
-                                        .bool => try allocPrint(alloc, " {s} = ${d}::bool", .{ field_name, i + 1 }),
+                                        .string, .integer, .float, .null, .bool => arg_blk: {
+                                            update_arg_count += 1;
+                                            break :arg_blk try allocPrint(alloc, " {s} = ${d} ", .{ field_name, update_arg_count });
+                                        },
                                         .array => |arr| arr_blk: {
-                                            if (arr.items.len == 0) break :arr_blk try allocPrint(alloc, "{s} = {{}} ", .{field_name});
-                                            switch (arr.items[0]) {
-                                                .string => break :arr_blk try allocPrint(alloc, " {s} = ${d}::TEXT[] ", .{ field_name, i + 1 }),
-                                                .integer => break :arr_blk try allocPrint(alloc, " {s} = ${d}::BIGINT[] ", .{ field_name, i + 1 }),
-                                                .float => break :arr_blk try allocPrint(alloc, " {s} = ${d}::FLOAT[] ", .{ field_name, i + 1 }),
-                                                .bool => break :arr_blk try allocPrint(alloc, " {s} = ${d}::BOOLEAN[] ", .{ field_name, i + 1 }),
-                                                else => {
-                                                    try res.json(.{
-                                                        .code = 400,
-                                                        .message = "Invalid payload",
-                                                        .details = try allocPrint(alloc, "The {s} field has an unsupported data type", .{field_name}),
-                                                    }, .{});
-                                                    return;
-                                                },
+                                            if (arr.items.len == 0) {
+                                                break :arr_blk try allocPrint(alloc, " {s} = '{{}}' ", .{field_name});
                                             }
-                                            break :arr_blk null;
+                                            update_arg_count += 1;
+                                            break :arr_blk switch (arr.items[0]) {
+                                                .string => try allocPrint(alloc, " {s} = ${d}::TEXT[] ", .{ field_name, update_arg_count }),
+                                                .integer => try allocPrint(alloc, " {s} = ${d}::BIGINT[] ", .{ field_name, update_arg_count }),
+                                                .float => try allocPrint(alloc, " {s} = ${d}::FLOAT[] ", .{ field_name, update_arg_count }),
+                                                .bool => try allocPrint(alloc, " {s} = ${d}::BOOLEAN[] ", .{ field_name, update_arg_count }),
+                                                else => null,
+                                            };
                                         },
                                         else => null,
                                     };
@@ -621,9 +620,12 @@ pub fn MainModule(role: type) type {
                                 &.{
                                     try allocPrint(alloc, "update {s} set ", .{self.name}), // update operation
                                     args,
-                                    try allocPrint(alloc, " where id = ${d}", .{values.len + 1}), //where,
+                                    try allocPrint(alloc, " where id = ${d}", .{update_arg_count + 1}), //where,
                                 },
                             );
+
+                            std.log.info("DB QUERY: {s}", .{query_args});
+
                             var stmt = try pg.Stmt.init(conn, .{});
                             errdefer stmt.deinit();
                             stmt.prepare(query_args) catch |err| {
@@ -640,6 +642,7 @@ pub fn MainModule(role: type) type {
                                 print("{}\n", .{err});
                                 return;
                             };
+
                             for (values) |v| {
                                 switch (v) {
                                     .string => |_v| try stmt.bind(_v),
@@ -705,7 +708,6 @@ pub fn MainModule(role: type) type {
                                 print("{}\n", .{err});
                                 return;
                             };
-                            std.log.info("DB QUERY: {s}", .{query_args});
 
                             const columns = try std.mem.join(alloc, ", ", keys);
                             defer alloc.free(columns);
@@ -734,7 +736,7 @@ pub fn MainModule(role: type) type {
                             };
 
                             defer query_row.?.deinit() catch {};
-                            const payload = try my_mapper(alloc, OptionalSchema, query_row.?.row);
+                            const payload = try query_row.?.row.to(OptionalSchema, .{ .allocator = alloc });
                             try res.json(payload, .{ .emit_null_optional_fields = false });
                         }
                     };

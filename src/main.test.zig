@@ -170,7 +170,7 @@ test "UserModule" {
     try testing.expect(@hasField(T_field_access, "Admin"));
     try testing.expect(@hasField(T_field_access, "Owner"));
     try testing.expect(@hasField(T_field_access, "Public"));
-    try testing.expect(@typeInfo(T_field_access).Struct.fields.len == 3);
+    try testing.expect(@typeInfo(T_field_access).@"struct".fields.len == 3);
     try testing.expect(@TypeOf(field_access.Admin.?.read) == UserFieldSet);
     try testing.expect(@TypeOf(field_access.Admin.?.update) == UserFieldSet);
     try testing.expect(@TypeOf(field_access.Owner.?.read) == UserFieldSet);
