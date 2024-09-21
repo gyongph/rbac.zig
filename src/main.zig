@@ -46,7 +46,7 @@ pub fn MainModule(role: type) type {
                     global.auth.role = .Guest;
                 } else {
                     const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
-                    var itr = std.mem.splitScalar(u8, bearer_token.?, " ");
+                    var itr = std.mem.splitSequence(u8, bearer_token.?, " ");
                     _ = itr.next();
                     const maybe_token = itr.next();
                     if (maybe_token) |token| {
@@ -186,13 +186,13 @@ pub fn MainModule(role: type) type {
                 if (module.routes) |routes| {
                     inline for (routes) |route| {
                         switch (route.method) {
-                            .POST => group.post(route.path, route.createHandler().action),
-                            .GET => group.get(route.path, route.createHandler().action),
-                            .PATCH => group.patch(route.path, route.createHandler().action),
-                            .DELETE => group.delete(route.path, route.createHandler().action),
-                            .PUT => group.put(route.path, route.createHandler().action),
-                            .OPTIONS => group.options(route.path, route.createHandler().action),
-                            .HEAD => group.head(route.path, route.createHandler().action),
+                            .POST => group.post(route.path, route.createHandler().action, .{}),
+                            .GET => group.get(route.path, route.createHandler().action, .{}),
+                            .PATCH => group.patch(route.path, route.createHandler().action, .{}),
+                            .DELETE => group.delete(route.path, route.createHandler().action, .{}),
+                            .PUT => group.put(route.path, route.createHandler().action, .{}),
+                            .OPTIONS => group.options(route.path, route.createHandler().action, .{}),
+                            .HEAD => group.head(route.path, route.createHandler().action, .{}),
                         }
                         std.log.info("\x1b[32mRoute added: {s} {s}{s}\x1b[m", .{ @tagName(route.method), path, route.path });
                     }

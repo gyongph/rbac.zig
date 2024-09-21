@@ -29,7 +29,7 @@ pub fn CreateStructFromEnum(comptime enum_type: type, comptime val_type: type, c
 
 pub fn changeStructFieldValueType(comptime str: type, comptime val_type: type) type {
     const real_struct = comptime switch (@typeInfo(str)) {
-        .Struct => |struct_info| struct_info,
+        .@"struct" => |struct_info| struct_info,
         else => @compileError("str must be a struct"),
     };
 
@@ -45,7 +45,7 @@ pub fn changeStructFieldValueType(comptime str: type, comptime val_type: type) t
     }
 
     return @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = fields[0..],
             .decls = &[_]std.builtin.Type.Declaration{},
