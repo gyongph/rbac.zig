@@ -34,7 +34,7 @@ pub fn MainModule(role: type) type {
         pub const Global = struct {
             pg_pool: *pg.Pool,
             auth: struct { id: ?[]const u8, role: role },
-            pub fn dispatcher(
+            pub fn dispatch(
                 global: *Global,
                 action: httpz.Action(*Global),
                 req: *httpz.Request,
