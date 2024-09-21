@@ -31,7 +31,54 @@ pub fn MainModule(role: type) type {
                 limit: usize = config.default_max_list_limit,
             };
         }
-        pub const Global = struct { pg_pool: *pg.Pool, auth: struct { id: ?[]const u8, role: role } };
+        pub const Global = struct {
+            pg_pool: *pg.Pool,
+            auth: struct { id: ?[]const u8, role: role },
+            pub fn dispatcher(
+                global: *Global,
+                action: httpz.Action(*Global),
+                req: *httpz.Request,
+                res: *httpz.Response,
+            ) !void {
+                const bearer_token = req.header("authorization");
+                if (bearer_token == null) {
+                    global.auth.id = null;
+                    global.auth.role = .Guest;
+                } else {
+                    const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
+                    var itr = std.mem.splitScalar(u8, bearer_token.?, " ");
+                    _ = itr.next();
+                    const maybe_token = itr.next();
+                    if (maybe_token) |token| {
+                        const payload = try Token.parse(req.arena, token, ACCESS_TOKEN_SECRET);
+                        global.auth.id = payload.id;
+                        global.auth.role = payload.role;
+                    } else return error.BAD_REQUEST;
+                }
+                try action(global, req, res);
+            }
+            pub fn uncaughtError(global: *Global, req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
+                _ = global;
+                switch (err) {
+                    error.UNAUTHORIZED => {
+                        res.status = 401;
+                        std.log.info("401 {s} {s} {}", .{ @tagName(req.method), req.url.path, err });
+                    },
+                    error.INVALID_TOKEN => {
+                        res.status = 401;
+                        res.body = "Invalid token";
+                    },
+                    error.EXPIRED_TOKEN => {
+                        res.status = 401;
+                        res.body = "Expired token";
+                    },
+                    else => |_err| {
+                        std.log.warn("{s} {s} => {}", .{ @tagName(req.method), req.url.path, _err });
+                        res.status = 500;
+                    },
+                }
+            }
+        };
         pub const Token = struct {
             const Self = @This();
             const ReturnToken = struct {
@@ -111,28 +158,28 @@ pub fn MainModule(role: type) type {
         const Server = struct {
             pg_pool: *pg.Pool,
             port: u16,
-            http_server: httpz.ServerApp(*Global) = undefined,
+            http_server: httpz.Server(*Global) = undefined,
 
             pub fn register(self: *Server, module: anytype) !void {
                 const info = @typeInfo(@TypeOf(module));
-                if (info != .Pointer) @panic("Expects a pointer to a module");
+                if (info != .pointer) @panic("Expects a pointer to a module");
                 try self.registerModule("", module);
             }
             fn registerModule(self: *Server, comptime parent_path: []const u8, comptime module: anytype) !void {
-                var router = self.http_server.router();
+                var router = self.http_server.router(.{});
                 const path = parent_path ++ module.path;
                 const id_param = "/:" ++ module.name ++ "_id";
                 print("\x1b[34mModule_loaded: {s} {s}: {s}\x1b[m\n", .{ module.name, path, @typeName(@TypeOf(module)) });
                 var group = router.group(path, .{});
-                group.get("/", module.listHandler().action);
+                group.get("/", module.listHandler().action, .{});
                 std.log.info("\x1b[32mRoute added: GET {s}/\x1b[m", .{path});
-                group.post("/", module.createAction().action);
+                group.post("/", module.createAction().action, .{});
                 std.log.info("\x1b[32mRoute added: POST {s}/\x1b[m", .{path});
-                group.delete(id_param, module.deleteHandler().action);
+                group.delete(id_param, module.deleteHandler().action, .{});
                 std.log.info("\x1b[32mRoute added: DELETE {s}{s}\x1b[m", .{ path, id_param });
-                group.get(id_param, module.getById);
+                group.get(id_param, module.getById, .{});
                 std.log.info("\x1b[32mRoute added: GET {s}{s}\x1b[m", .{ path, id_param });
-                group.patch(id_param, module.updateById);
+                group.patch(id_param, module.updateById, .{});
                 std.log.info("\x1b[32mRoute added: PATCH {s}{s}\x1b[m", .{ path, id_param });
 
                 // other routes
@@ -152,57 +199,13 @@ pub fn MainModule(role: type) type {
                 }
                 const sub = module.sub_modules;
                 const sub_info = @typeInfo(@TypeOf(sub));
-                if (sub_info == .Pointer) {
-                    const child_info = @typeInfo(sub_info.Pointer.child);
+                if (sub_info == .pointer) {
+                    const child_info = @typeInfo(sub_info.pointer.child);
                     if (child_info == .@"struct" and child_info.@"struct".is_tuple == true) {
                         inline for (sub.*) |mod| {
                             try self.registerModule(path ++ id_param, &mod);
                         }
                     }
-                }
-            }
-            pub fn dispatcher(
-                global: *Global,
-                action: httpz.Action(*Global),
-                req: *httpz.Request,
-                res: *httpz.Response,
-            ) !void {
-                const bearer_token = req.header("authorization");
-                if (bearer_token == null) {
-                    global.auth.id = null;
-                    global.auth.role = .Guest;
-                } else {
-                    const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
-                    var itr = std.mem.splitScalar(u8, bearer_token.?, " ");
-                    _ = itr.next();
-                    const maybe_token = itr.next();
-                    if (maybe_token) |token| {
-                        const payload = try Token.parse(req.arena, token, ACCESS_TOKEN_SECRET);
-                        global.auth.id = payload.id;
-                        global.auth.role = payload.role;
-                    } else return error.BAD_REQUEST;
-                }
-                try action(global, req, res);
-            }
-            pub fn errorHandler(global: *Global, req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
-                _ = global;
-                switch (err) {
-                    error.UNAUTHORIZED => {
-                        res.status = 401;
-                        std.log.info("401 {s} {s} {}", .{ @tagName(req.method), req.url.path, err });
-                    },
-                    error.INVALID_TOKEN => {
-                        res.status = 401;
-                        res.body = "Invalid token";
-                    },
-                    error.EXPIRED_TOKEN => {
-                        res.status = 401;
-                        res.body = "Expired token";
-                    },
-                    else => |_err| {
-                        std.log.warn("{s} {s} => {}", .{ @tagName(req.method), req.url.path, _err });
-                        res.status = 500;
-                    },
                 }
             }
         };
@@ -220,7 +223,7 @@ pub fn MainModule(role: type) type {
                     .role = .Guest,
                 },
             };
-            var server = try httpz.ServerApp(*Global).init(
+            var server = try httpz.Server(*Global).init(
                 alloc,
                 .{
                     .port = args.port,
@@ -228,8 +231,7 @@ pub fn MainModule(role: type) type {
                 },
                 &_global,
             );
-            server.dispatcher(Server.dispatcher);
-            server.errorHandler(Server.errorHandler);
+            _ = &server;
             return Server{
                 .pg_pool = args.pg_pool,
                 .port = args.port,
@@ -332,11 +334,11 @@ pub fn MainModule(role: type) type {
                             if (!allowed) return error.UNAUTHORIZED;
                             switch (self.record_access.list.handler) {
                                 .config => |_config| {
-                                    const query = req.query();
+                                    const query = try req.query();
                                     const page = try std.fmt.parseInt(usize, if (query.get("page")) |page| page else "1", 10);
-                                    const limit = try std.fmt.parseInt(usize, if (query.get("limit")) |limit| limit else 10, 10);
+                                    const limit = try std.fmt.parseInt(usize, if (query.get("limit")) |limit| limit else "10", 10);
                                     try self.listAction(.{
-                                        .selected_fields = _config.selected_fields,
+                                        .select = _config.select,
                                         .where = _config.where,
                                         .page = page,
                                         .limit = limit,

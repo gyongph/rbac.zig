@@ -1,5 +1,6 @@
 const std = @import("std");
 const httpz = @import("httpz");
+const DB = @import("db.zig");
 const MainModule = @import("main.zig").MainModule;
 const Utils = @import("utils/lib.zig");
 const TypeUtils = @import("type-utils.zig");
@@ -192,3 +193,14 @@ test "Token" {
     try testing.expectEqualStrings(parsed.id, payload.id);
     try testing.expectEqual(parsed.role, payload.role);
 }
+
+// test "server" {
+//     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+//     const allocator = gpa.allocator();
+//     const db = try DB.init(allocator, 20);
+//     var server = try main_module.createServer(allocator, .{
+//         .pg_pool = db,
+//         .port = 5454,
+//     });
+//     try server.register(&UserModule);
+// }
