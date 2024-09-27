@@ -596,6 +596,7 @@ pub fn MainModule(role: type) type {
                                             .message = "UNAUTHORIZED",
                                             .detail = try allocPrint(alloc, "Updating {s} field is not included in your permission.", .{field_name}),
                                         }, .{});
+                                        return;
                                     }
                                     const set_args: ?[]const u8 = switch (values[i]) {
                                         .string, .integer, .float, .null, .bool => arg_blk: {
