@@ -360,6 +360,9 @@ pub fn MainModule(role: type) type {
                     req: *Request,
                     res: *Response,
                 ) !void {
+                    const request_id = Utils.String.random(8);
+                    var timer = try std.time.Timer.start();
+                    defer std.log.info("{s}: ({}ms) end", .{ request_id, timer.read() / std.time.ns_per_ms });
                     const allocator = req.arena;
                     if (options.where.len == 0) @panic("[where] field is empty");
                     const select = switch (options.select) {
@@ -381,7 +384,7 @@ pub fn MainModule(role: type) type {
                     };
                     const page = if (options.page < 1) 1 else options.page;
                     const limit = if (options.limit < 1) config.default_max_list_limit else options.limit;
-
+                    std.log.info("{s}: ({}ms) beginning -> args prep", .{ request_id, timer.read() / std.time.ns_per_ms });
                     const conn = try ctx.pg_pool.acquire();
                     defer conn.release();
                     const total_count = blk: {
@@ -406,6 +409,9 @@ pub fn MainModule(role: type) type {
                         try row.drain();
                         break :blk row_1.?.get(i64, 0);
                     };
+
+                    std.log.info("{s}: ({}ms) args prep -> getCount", .{ request_id, timer.read() / std.time.ns_per_ms });
+
                     const results = conn.queryOpts(
                         try std.fmt.allocPrint(req.arena, "SELECT {s} from {s} WHERE {s} limit $1 OFFSET ($2 - 1) * $1", .{ select, self.name, options.where }),
                         .{ limit, page },
@@ -424,12 +430,17 @@ pub fn MainModule(role: type) type {
                         return; // end request
                     };
                     defer results.deinit();
+
+                    std.log.info("{s}: ({}ms) getCount -> getquery", .{ request_id, timer.read() / std.time.ns_per_ms });
+
                     const mapper = results.mapper(OptionalSchema, .{ .allocator = allocator, .dupe = true });
                     var list = std.ArrayList(OptionalSchema).init(req.arena);
                     defer list.deinit();
                     while (try mapper.next()) |item| {
                         try list.append(item);
                     }
+                    std.log.info("{s}: ({}ms) getQuery-> mapper", .{ request_id, timer.read() / std.time.ns_per_ms });
+
                     res.status = 200;
                     try res.json(.{
                         .page = page,
@@ -456,6 +467,8 @@ pub fn MainModule(role: type) type {
                 pub fn getByIdHandler(self: Self) type {
                     return struct {
                         pub fn action(ctx: *Global, req: *Request, res: *Response) !void {
+                            var timer = try std.time.Timer.start();
+                            defer std.log.info("getById: {}ms ", .{timer.read() / std.time.ns_per_ms});
                             const alloc = req.arena;
                             const id = req.param(self.name ++ "_id").?;
                             const type_info = @typeInfo(@TypeOf(self.field_access));
@@ -516,19 +529,22 @@ pub fn MainModule(role: type) type {
                                 return err;
                             };
                             defer result.deinit();
-                            const row = try result.next();
-                            if (row == null) {
-                                res.status = 400;
-                                return;
+                            const mapper = result.mapper(OptionalSchema, .{ .allocator = alloc });
+                            res.status = 404;
+                            while (try mapper.next()) |data| {
+                                res.status = 200;
+                                try res.json(data, .{ .emit_null_optional_fields = false });
                             }
-                            const data = try row.?.to(OptionalSchema, .{ .allocator = alloc, .dupe = true });
-                            try res.json(data, .{ .emit_null_optional_fields = false });
+                            std.log.info("getById: {}ms {s}", .{ timer.read() / std.time.ns_per_ms, query });
                         }
                     };
                 }
                 pub fn updateByIdHandler(self: Self) type {
                     return struct {
                         pub fn action(ctx: *Global, req: *Request, res: *Response) !void {
+                            const request_id = Utils.String.random(6);
+                            var timer = try std.time.Timer.start();
+                            defer std.log.info("{s}: {}ms", .{ request_id, timer.read() / std.time.ns_per_ms });
                             const alloc = req.arena;
                             const id = req.param(self.name ++ "_id").?;
                             const type_info = @typeInfo(@TypeOf(self.field_access));
@@ -558,7 +574,7 @@ pub fn MainModule(role: type) type {
                             const values = selected_fields.values();
                             const keys = selected_fields.keys();
                             var update_arg_count: usize = 0;
-
+                            std.log.info("{s}: ({}ms) beginning -> var preparation", .{ request_id, timer.read() / std.time.ns_per_ms });
                             const args: []const u8 = blk: {
                                 var _args = std.ArrayList([]const u8).init(alloc);
                                 defer _args.deinit();
@@ -614,21 +630,24 @@ pub fn MainModule(role: type) type {
                                 }
                                 break :blk try std.mem.join(alloc, " , ", _args.items);
                             };
+                            std.log.info("{s}: ({}ms) var preparation -> arg preparation ", .{ request_id, timer.read() / std.time.ns_per_ms });
+
                             const conn = try ctx.pg_pool.acquire();
                             defer conn.release();
+                            const columns = try std.mem.join(alloc, ", ", keys);
                             const query_args = try std.mem.concat(
                                 alloc,
                                 u8,
                                 &.{
                                     try allocPrint(alloc, "update {s} set ", .{self.name}), // update operation
                                     args,
-                                    try allocPrint(alloc, " where id = ${d}", .{update_arg_count + 1}), //where,
+                                    try allocPrint(alloc, " where id = ${d} returning {s}", .{ update_arg_count + 1, columns }), //where,
                                 },
                             );
 
                             std.log.info("DB QUERY: {s}", .{query_args});
 
-                            var stmt = try pg.Stmt.init(conn, .{});
+                            var stmt = try pg.Stmt.init(conn, .{ .column_names = true, .allocator = alloc });
                             errdefer stmt.deinit();
                             stmt.prepare(query_args) catch |err| {
                                 if (conn.err) |pg_err| {
@@ -644,6 +663,8 @@ pub fn MainModule(role: type) type {
                                 print("{}\n", .{err});
                                 return;
                             };
+
+                            std.log.info("{s}: ({}ms) arg preparation -> stmt.prepare", .{ request_id, timer.read() / std.time.ns_per_ms });
 
                             for (values) |v| {
                                 switch (v) {
@@ -695,8 +716,9 @@ pub fn MainModule(role: type) type {
                                 }
                             }
                             try stmt.bind(id);
+                            std.log.info("{s}: ({}ms) stmt.prepare -> stmt.bind", .{ request_id, timer.read() / std.time.ns_per_ms });
 
-                            _ = stmt.execute() catch |err| {
+                            const result = stmt.execute() catch |err| {
                                 if (conn.err) |pg_err| {
                                     res.status = 400;
                                     try res.json(.{
@@ -710,36 +732,14 @@ pub fn MainModule(role: type) type {
                                 print("{}\n", .{err});
                                 return;
                             };
+                            std.log.info("{s}: ({}ms) stmt.bind -> stmt.execute", .{ request_id, timer.read() / std.time.ns_per_ms });
+                            const mapper = result.mapper(OptionalSchema, .{ .allocator = alloc });
+                            res.status = 404; // default
 
-                            const columns = try std.mem.join(alloc, ", ", keys);
-                            defer alloc.free(columns);
-
-                            const get_query = try allocPrint(alloc, "SELECT {s} FROM {s} where id = '{s}'", .{ columns, self.name, id });
-                            defer alloc.free(get_query);
-
-                            const get_conn = try ctx.pg_pool.acquire();
-                            defer get_conn.release();
-                            var query_row = get_conn.rowOpts(get_query, .{}, .{
-                                .allocator = req.arena,
-                                .column_names = true,
-                            }) catch |err| {
-                                if (conn.err) |pg_err| {
-                                    res.status = 400;
-                                    try res.json(.{
-                                        .code = pg_err.code,
-                                        .message = pg_err.message,
-                                        .detail = pg_err.detail,
-                                        .constraint = pg_err.constraint,
-                                    }, .{});
-                                    std.log.warn("update failure: {s}", .{pg_err.message});
-                                }
-                                print("{}\n", .{err});
-                                return;
-                            };
-
-                            defer query_row.?.deinit() catch {};
-                            const payload = try query_row.?.row.to(OptionalSchema, .{ .allocator = alloc });
-                            try res.json(payload, .{ .emit_null_optional_fields = false });
+                            while (try mapper.next()) |data| {
+                                res.status = 200;
+                                try res.json(data, .{ .emit_null_optional_fields = false });
+                            }
                         }
                     };
                 }
@@ -747,77 +747,4 @@ pub fn MainModule(role: type) type {
         }
     };
     return RBA;
-}
-fn my_mapper(alloc: std.mem.Allocator, s: type, row: pg.Row) !s {
-    var column_indexes: [std.meta.fields(s).len]?usize = undefined;
-    var value: s = undefined;
-    inline for (std.meta.fields(s), 0..) |f, i| {
-        column_indexes[i] = row._result.columnIndex(f.name);
-    }
-    inline for (std.meta.fields(s), column_indexes) |f, optional_column_index| {
-        if (optional_column_index) |idx| {
-            switch (f.type) {
-                []const u8,
-                []u8,
-                i16,
-                i32,
-                i64,
-                f32,
-                f64,
-                bool,
-                ?[]const u8,
-                ?[]u8,
-                ?i16,
-                ?i32,
-                ?i64,
-                ?f32,
-                ?f64,
-                ?bool,
-                => @field(value, f.name) = row.get(f.type, idx),
-
-                [][]const u8,
-                [][]u8,
-                []i16,
-                []i32,
-                []i64,
-                []f32,
-                []f64,
-                []bool,
-                => {
-                    const t = @typeInfo(f.type).Pointer.child;
-                    var list = std.ArrayList(t).init(alloc);
-                    var itr = row.get(pg.Iterator(t), idx);
-                    while (itr.next()) |data| {
-                        try list.append(data);
-                    }
-                    @field(value, f.name) = try list.toOwnedSlice();
-                },
-                ?[][]const u8,
-                ?[][]u8,
-                ?[]i16,
-                ?[]i32,
-                ?[]i64,
-                ?[]f32,
-                ?[]f64,
-                ?[]bool,
-                => {
-                    const t = @typeInfo(@typeInfo(f.type).Optional.child).Pointer.child;
-                    var list = std.ArrayList(t).init(alloc);
-                    var itr = row.get(pg.Iterator(t), idx);
-                    while (itr.next()) |data| {
-                        try list.append(data);
-                    }
-                    @field(value, f.name) = try list.toOwnedSlice();
-                },
-                else => {
-                    @compileError(@typeName(s) ++ " " ++ f.name ++ " field type is not supported: " ++ @typeName(f.type));
-                },
-            }
-        } else if (f.default_value) |dflt| {
-            @field(value, f.name) = @as(*align(1) const f.type, @ptrCast(dflt)).*;
-        } else {
-            return error.FieldColumnMismatch;
-        }
-    }
-    return value;
 }
