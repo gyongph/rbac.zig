@@ -28,8 +28,8 @@
             .hash = "12209018285fde7ae6216acafe44fc199036239e1f24bda2b513bbcc1b6bc9a70752",
         },
         .pg = .{
-            .url = "git+https://github.com/karlseguin/pg.zig?ref=master#d3ff7ab558b6ec1cc9b0de1606dbea364cf2d3b7",
-            .hash = "1220829e07672808e21d2b07544ed3567299b03d4fb694cd6dd0ece6c433b3a1309f",
+            .url = "git+https://github.com/karlseguin/pg.zig?ref=master#ae117876d8ea4f0854c5aa5e310d1f566eaa9470",
+            .hash = "12201ba2918a9af2322f668f13f32150bd74845493bf7ca0ffb03b4d3b7c8eab49fe",
         },
     },
     .paths = .{""},
