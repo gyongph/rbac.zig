@@ -11,7 +11,7 @@ pub fn CreateStructFromEnum(comptime enum_type: type, comptime val_type: type, c
         fields[i] = .{
             .name = field.name,
             .type = val_type,
-            .default_value = if (field_default) |d| @as(?*const anyopaque, @ptrCast(&d)) else field.default,
+            .default_value = if (field_default) |d| @as(?*const anyopaque, @ptrCast(&d)) else null,
             .is_comptime = false,
             .alignment = 0,
         };
