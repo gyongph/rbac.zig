@@ -11,7 +11,7 @@ pub fn CreateStructFromEnum(comptime enum_type: type, comptime val_type: type, c
         fields[i] = .{
             .name = field.name,
             .type = val_type,
-            .default_value = if (field_default) |d| @as(?*const anyopaque, @ptrCast(&d)) else null,
+            .default_value = if (field_default) |d| @as(?*const anyopaque, @ptrCast(&d)) else field.default,
             .is_comptime = false,
             .alignment = 0,
         };
@@ -257,4 +257,22 @@ test "ChangeFieldType" {
     try testing.expect(sample_a.age == null);
     const sample_b = NewSample{ .name = "jhon", .age = 10 };
     try testing.expect(sample_b.age == 10);
+}
+
+pub fn MatchStructFields(str: type, field_enum: type) type {
+    const struct_info = @typeInfo(str);
+    if (struct_info != .@"struct") @compileError("str not a struct");
+    const enum_info = @typeInfo(field_enum);
+    if (enum_info != .@"enum") @compileError("field_enum not an enum");
+    const str_fields = std.meta.fields(str);
+    inline for (str_fields) |f| {
+        _ = std.enums.nameCast(field_enum, f.name);
+    }
+    const enum_fields = std.meta.fields(field_enum);
+    inline for (enum_fields) |f| {
+        if (!@hasField(str, f.name)) {
+            @compileError(f.name ++ " field does not exist in " ++ @typeName(str));
+        }
+    }
+    return field_enum;
 }
