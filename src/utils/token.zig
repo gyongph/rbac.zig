@@ -5,10 +5,10 @@ const random = std.crypto.random;
 
 const token_data_separator = "‎:";
 
-pub fn generate(alloc: std.mem.Allocator, Payload: type, secret: []const u8) ![]const u8 {
+pub fn generate(alloc: std.mem.Allocator, payload: anytype, secret: []const u8) ![]const u8 {
     var stream = std.ArrayList(u8).init(alloc);
     stream.deinit();
-    try std.json.stringify(Payload, .{}, stream.writer());
+    try std.json.stringify(payload, .{}, stream.writer());
 
     var salt = [_]u8{undefined} ** 64;
     random.bytes(&salt);
