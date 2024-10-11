@@ -15,9 +15,19 @@ const assert = Utils.assert;
 const EnvVar = Utils.EnvVar;
 const sha512 = Utils.Hash;
 const base64 = Utils.Base64;
+const Token = Utils.Token;
+
+pub fn TokenPayload(role: type) type {
+    return struct {
+        id: []const u8,
+        role: role = .Guest,
+        created_at: i64,
+        expires_at: i64,
+    };
+}
 
 pub fn MainModule(role: type) type {
-    const RBA = struct {
+    const RBAC = struct {
         pub fn ListOptions(f_set: type) type {
             return struct {
                 pub const SelectOption = enum { fields, raw };
@@ -50,7 +60,7 @@ pub fn MainModule(role: type) type {
                     _ = itr.next();
                     const maybe_token = itr.next();
                     if (maybe_token) |token| {
-                        const payload = try Token.parse(req.arena, token, ACCESS_TOKEN_SECRET);
+                        const payload = try Token.parse(req.arena, TokenPayload(role), token, ACCESS_TOKEN_SECRET);
                         global.auth.id = payload.id;
                         global.auth.role = payload.role;
                     } else return error.BAD_REQUEST;
@@ -77,80 +87,6 @@ pub fn MainModule(role: type) type {
                         res.status = 500;
                     },
                 }
-            }
-        };
-        pub const Token = struct {
-            const Self = @This();
-            const ReturnToken = struct {
-                token: []const u8,
-                created_at: i64,
-                expires_at: i64,
-            };
-            const Payload = struct {
-                id: []const u8,
-                role: role = .Guest,
-                created_at: i64,
-                expires_at: i64,
-            };
-            const token_data_separator = "‎:"; // empty space
-
-            /// requires an arena allocator to free all at once \
-            /// expires_at is in minutes
-            pub fn create(alloc: std.mem.Allocator, payload: struct { id: []const u8, role: role, expires_at: i64 }, secret: []const u8) !ReturnToken {
-                const now = std.time.milliTimestamp();
-                const expires_at = now + (payload.expires_at * std.time.ms_per_min);
-                const token_payload = .{
-                    .id = payload.id,
-                    .role = payload.role,
-                    .created_at = now,
-                    .expires_at = expires_at,
-                };
-                const token = try generateToken(alloc, token_payload, secret);
-                return ReturnToken{
-                    .token = token,
-                    .created_at = now,
-                    .expires_at = expires_at,
-                };
-            }
-
-            pub fn generateToken(alloc: std.mem.Allocator, payload: Payload, secret: []const u8) ![]const u8 {
-                var stream = std.ArrayList(u8).init(alloc);
-                stream.deinit();
-                try std.json.stringify(payload, .{}, stream.writer());
-
-                var salt = [_]u8{undefined} ** 64;
-                random.bytes(&salt);
-
-                const hash_payload = try std.mem.concat(alloc, u8, &.{ &salt, stream.items, secret });
-                var signature = [_]u8{undefined} ** 64;
-                try sha512.hash(hash_payload, &signature);
-
-                alloc.free(hash_payload);
-                const token = try std.mem.join(alloc, token_data_separator, &.{ &salt, stream.items, &signature });
-                defer alloc.free(token);
-
-                const base_64_token = try base64.encode(alloc, token);
-                return base_64_token;
-            }
-
-            /// requires an arena allocator to free everything at once
-            pub fn parse(allocator: std.mem.Allocator, token: []const u8, secret: []const u8) !Payload {
-                const now = std.time.milliTimestamp();
-                const raw_buf = try base64.decode(allocator, token);
-                var token_parts = std.mem.splitSequence(u8, raw_buf, token_data_separator);
-                const random_bytes = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
-                const payload = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
-                const signature = if (token_parts.next()) |part| part else return error.INVALID_TOKEN;
-                const challenge = try std.mem.concat(allocator, u8, &.{ random_bytes, payload, secret });
-                defer allocator.free(challenge);
-                var resulted_hash = [_]u8{undefined} ** 64;
-                try sha512.hash(challenge, &resulted_hash);
-                const same_hash = std.mem.eql(u8, signature, &resulted_hash);
-                if (!same_hash) return error.INVALID_TOKEN;
-
-                const parsed_payload = try std.json.parseFromSlice(Payload, allocator, payload, .{});
-                if (parsed_payload.value.expires_at < now) return error.EXPIRED_TOKEN;
-                return parsed_payload.value;
             }
         };
         var _global: Global = undefined;
@@ -239,12 +175,11 @@ pub fn MainModule(role: type) type {
             };
         }
 
-        const ModuleStruct = struct {};
         /// Field of your schema should follow the pg.zig constraints \
         /// check pg.zig [supported types](https://github.com/karlseguin/pg.zig?tab=readme-ov-file#array-columns)
         pub fn Module(comptime Schema: type, schema_fields: ?type, Accesor: type, sub_modules: anytype) type {
             const OptionalSchema = TypeUtils.Partial(Schema);
-            const Fields = if (schema_fields == null) TypeUtils.StructFieldsAsEnum(Schema) else schema_fields.?;
+            const Fields = if (schema_fields) |f| TypeUtils.MatchStructFields(Schema, f) else TypeUtils.StructFieldsAsEnum(Schema);
             const Route = struct {
                 method: httpz.Method,
                 path: []const u8,
@@ -285,8 +220,18 @@ pub fn MainModule(role: type) type {
                 field_access: TypeUtils.CreateStructFromEnum(
                     Accesor,
                     ?struct {
-                        update: std.EnumSet(Fields),
-                        read: std.EnumSet(Fields),
+                        const Options = enum {
+                            fields,
+                            getFields,
+                        };
+                        update: union(Options) {
+                            fields: ?std.EnumSet(Fields),
+                            getFields: *const fn (ctx: *Global, req: *Request, res: *Response) anyerror!?std.EnumSet(Fields),
+                        },
+                        read: union(Options) {
+                            fields: ?std.EnumSet(Fields),
+                            getFields: *const fn (ctx: *Global, req: *Request, res: *Response) anyerror!?std.EnumSet(Fields),
+                        },
                     },
                     null,
                 ),
@@ -482,7 +427,12 @@ pub fn MainModule(role: type) type {
                                 inline for (field_access_fields) |f| {
                                     if (std.mem.eql(u8, accessor_name, f.name)) {
                                         const field_access = @field(self.field_access, f.name);
-                                        if (field_access) |x| break :blk x.read;
+                                        if (field_access) |x| {
+                                            switch (x.read) {
+                                                .fields => |fs| break :blk fs,
+                                                .getFields => |getFields| break :blk try getFields(ctx, req, res),
+                                            }
+                                        }
                                         break :blk null;
                                     }
                                 }
@@ -558,13 +508,17 @@ pub fn MainModule(role: type) type {
                                 inline for (field_access_fields) |f| {
                                     if (std.mem.eql(u8, accessor_name, f.name)) {
                                         const field_access = @field(self.field_access, f.name);
-                                        if (field_access) |x| break :blk x.update;
+                                        if (field_access) |x| {
+                                            switch (x.update) {
+                                                .fields => |fs| break :blk fs,
+                                                .getFields => |getFields| break :blk try getFields(ctx, req, res),
+                                            }
+                                        }
                                         break :blk null;
                                     }
                                 }
                                 break :blk null;
                             };
-
                             if (maybe_update_access == null or maybe_update_access.?.count() == 0) return error.UNAUTHORIZED;
 
                             const update_access = maybe_update_access.?;
@@ -747,5 +701,5 @@ pub fn MainModule(role: type) type {
             };
         }
     };
-    return RBA;
+    return RBAC;
 }
