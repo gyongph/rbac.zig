@@ -23,34 +23,13 @@ pub fn SecurityToken(role: type) type {
         const CreatePayload = struct {
             id: []const u8,
             role: role,
-            expires_at: i64,
-        };
-        const ReturnToken = struct {
-            token: []const u8,
-            created_at: i64,
-            expires_at: i64,
         };
         id: []const u8,
         role: role = .Guest,
-        created_at: i64,
-        expires_at: i64,
-        pub fn create(alloc: std.mem.Allocator, payload: CreatePayload, secret: []const u8) !ReturnToken {
-            const now = std.time.milliTimestamp();
-            const expires_at = now + (std.time.ms_per_min * payload.expires_at);
-
-            const token_payload: Self = .{
-                .id = payload.id,
-                .role = payload.role,
-                .created_at = now,
-                .expires_at = expires_at,
-            };
-            return .{
-                .token = try Token.generate(alloc, token_payload, secret),
-                .created_at = now,
-                .expires_at = expires_at,
-            };
+        pub fn create(alloc: std.mem.Allocator, payload: CreatePayload, expires_at: []const u8, secret: []const u8) !Token.GeneratedToken {
+            return try Token.generate(alloc, payload, expires_at, secret);
         }
-        pub fn parse(alloc: std.mem.Allocator, token: []const u8, secret: []const u8) !Self {
+        pub fn parse(alloc: std.mem.Allocator, token: []const u8, secret: []const u8) !Token.ParsedToken(Self) {
             return try Token.parse(alloc, Self, token, secret);
         }
     };
@@ -91,8 +70,8 @@ pub fn MainModule(role: type) type {
                     const maybe_token = itr.next();
                     if (maybe_token) |token| {
                         const payload = try Token.parse(req.arena, SecurityToken(role), token, ACCESS_TOKEN_SECRET);
-                        global.auth.id = payload.id;
-                        global.auth.role = payload.role;
+                        global.auth.id = payload.data.id;
+                        global.auth.role = payload.data.role;
                     } else return error.BAD_REQUEST;
                 }
                 try action(global, req, res);
