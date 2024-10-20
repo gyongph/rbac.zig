@@ -51,19 +51,26 @@ pub fn MainModule(role: type) type {
             };
         }
         pub const Global = struct {
+            request_id: [7]u8,
             pg_pool: *pg.Pool,
             auth: struct { id: ?[]const u8, role: role },
             pub fn dispatch(
-                global: *Global,
+                ctx: *Global,
                 action: httpz.Action(*Global),
                 req: *httpz.Request,
                 res: *httpz.Response,
             ) !void {
+                const request_id = Utils.String.random(7);
                 const bearer_token = req.header("authorization");
-                if (bearer_token == null) {
-                    global.auth.id = null;
-                    global.auth.role = .Guest;
-                } else {
+                var global: Global = .{
+                    .request_id = request_id,
+                    .auth = .{
+                        .id = null,
+                        .role = .Guest,
+                    },
+                    .pg_pool = ctx.pg_pool,
+                };
+                if (bearer_token != null) {
                     const ACCESS_TOKEN_SECRET = try EnvVar.get("ACCESS_TOKEN_SECRET");
                     var itr = std.mem.splitSequence(u8, bearer_token.?, " ");
                     _ = itr.next();
@@ -74,7 +81,7 @@ pub fn MainModule(role: type) type {
                         global.auth.role = payload.data.role;
                     } else return error.BAD_REQUEST;
                 }
-                try action(global, req, res);
+                try action(&global, req, res);
             }
             pub fn uncaughtError(global: *Global, req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
                 _ = global;
@@ -162,6 +169,7 @@ pub fn MainModule(role: type) type {
             },
         ) !Server {
             _global = Global{
+                .request_id = "1234567".*,
                 .pg_pool = args.pg_pool,
                 .auth = .{
                     .id = null,
