@@ -1,8 +1,8 @@
 const std = @import("std");
 const print = std.debug.print;
 const testing = std.testing;
-const Encoder = std.base64.standard.Encoder;
-const Decoder = std.base64.standard.Decoder;
+const Encoder = std.base64.url_safe_no_pad.Encoder;
+const Decoder = std.base64.url_safe_no_pad.Decoder;
 
 /// need to free buffer
 pub fn encode(alloc: std.mem.Allocator, src: []const u8) ![]const u8 {
