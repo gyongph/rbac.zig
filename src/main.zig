@@ -477,9 +477,12 @@ pub fn MainModule(role: type) type {
                                 } else {
                                     var columns = std.ArrayList([]const u8).init(alloc);
                                     defer columns.deinit();
-                                    var itr = read_access.iterator();
-                                    while (itr.next()) |field_tag| {
-                                        try columns.append(@tagName(field_tag));
+                                    inline for (std.meta.fields(Schema)) |f| {
+                                        const tag = std.meta.stringToEnum(schema_fields.?, f.name).?;
+                                        if (read_access.contains(tag)) {
+                                            const pg_type = Utils.PGType.get(f.type);
+                                            try columns.append(f.name ++ pg_type);
+                                        }
                                     }
                                     const stringed_columns = try std.mem.join(alloc, ", ", columns.items);
                                     defer alloc.free(stringed_columns);

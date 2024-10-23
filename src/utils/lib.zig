@@ -7,3 +7,4 @@ pub const EnvVar = @import("env-var.zig");
 pub const String = @import("string.zig");
 pub const Number = @import("number.zig");
 pub const Token = @import("token.zig");
+pub const PGType = @import("pg-type.zig");

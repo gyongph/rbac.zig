@@ -5,12 +5,6 @@ const random = std.crypto.random;
 
 const token_data_separator = "‎:";
 
-pub const GeneratedToken = struct {
-    token: []const u8,
-    created_at: i64,
-    expires_at: i64,
-};
-
 pub fn parseExpiration(expiration: []const u8) !i64 {
     if (expiration.len < 2) {
         return error.InvalidFormat;
@@ -19,28 +13,25 @@ pub fn parseExpiration(expiration: []const u8) !i64 {
     const unit = expiration[expiration.len - 1];
     const time_value = try std.fmt.parseInt(i64, time_part, 10);
     const now = std.time.milliTimestamp();
-    switch (unit) {
-        's' => {
-            return now + (time_value * std.time.ms_per_s); // Add seconds
-        },
-        'm' => {
-            return now + (time_value * std.time.ms_per_min); // Add minutes
-        },
-        'h' => {
-            return now + (time_value * std.time.ms_per_hour); // Add hours
-        },
-        'd' => {
-            return now + (time_value * std.time.ms_per_day); // Add days
-        },
-        'w' => {
-            return now + (time_value * std.time.ms_per_week); // Add weeks
-        },
-        else => return error.InvalidUnit,
-    }
+    return switch (unit) {
+        's' => now + (time_value * std.time.ms_per_s),
+        'm' => now + (time_value * std.time.ms_per_min),
+        'h' => now + (time_value * std.time.ms_per_hour),
+        'd' => now + (time_value * std.time.ms_per_day),
+        'w' => now + (time_value * std.time.ms_per_week),
+        else => error.InvalidUnit,
+    };
 }
+
+pub const GeneratedToken = struct {
+    token: []const u8,
+    created_at: i64,
+    expires_at: i64,
+};
+
 pub fn generate(alloc: std.mem.Allocator, payload: anytype, expires_at: []const u8, secret: []const u8) !GeneratedToken {
     var stream = std.ArrayList(u8).init(alloc);
-    stream.deinit();
+    defer stream.deinit();
     const now = std.time.milliTimestamp();
     const expiration: i64 = try parseExpiration(expires_at);
 
@@ -76,6 +67,7 @@ pub fn ParsedToken(data: type) type {
         data: data,
         created_at: i64,
         expires_at: i64,
+        buffer: []u8,
     };
 }
 
@@ -95,6 +87,7 @@ pub fn parse(allocator: std.mem.Allocator, Payload: type, token: []const u8, sec
     if (!same_hash) return error.INVALID_TOKEN;
 
     const parsed_payload = try std.json.parseFromSlice(ParsedToken(Payload), allocator, payload, .{});
+    defer parsed_payload.deinit();
     if (parsed_payload.value.expires_at < now) return error.EXPIRED_TOKEN;
     return parsed_payload.value;
 }
@@ -112,6 +105,6 @@ test "Token" {
     const payload = Payload{ .name = "user1", .age = 18 };
     const result = try generate(allocator, payload, "5m", secret);
     const parsed = try parse(allocator, Payload, result.token, secret);
-    try std.testing.expectEqualStrings(parsed.data.name, payload.name);
-    try std.testing.expectEqual(parsed.data.age, payload.age);
+    try std.testing.expectEqualStrings(payload.name, parsed.data.name);
+    try std.testing.expectEqual(payload.age, parsed.data.age);
 }
