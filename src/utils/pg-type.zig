@@ -38,25 +38,38 @@ test getBaseType {
     try testing.expectEqual([][]*?number_enum, getBaseType([][]*?number_enum));
 }
 
+const types = [6][]const u8{
+    "::TEXT",
+    "::SMALLINT",
+    "::BIGINT",
+    "::BOOL",
+    "::TEXT[]",
+    "::SMALLINT[]",
+    "::BIGINT[]",
+    "::BOOL[]",
+};
+
 pub fn get(comptime T: type) switch (getBaseType(T)) {
-    []const u8, []u8 => *const [2 + 4:0]u8,
-    [][]const u8, [][]u8 => *const [2 + 6:0]u8,
-    i16 => *const [2 + 8:0]u8,
-    []i16 => *const [2 + 10:0]u8,
-    i64 => *const [2 + 6:0]u8,
-    []i64 => *const [2 + 8:0]u8,
-    bool => *const [2 + 4:0]u8,
-    []bool => *const [2 + 6:0]u8,
+    []const u8, []u8 => *const [types[0].len]u8,
+    [][]const u8, [][]u8 => *const [types[1].len]u8,
+    i16 => *const [types[2].len]u8,
+    []i16 => *const [types[3].len]u8,
+    i64 => *const [types[4].len]u8,
+    []i64 => *const [types[5].len]u8,
+    bool => *const [types[6].len]u8,
+    []bool => *const [types[7].len]u8,
     else => *const [0:0]u8,
 } {
     const base_type = getBaseType(T);
     return switch (base_type) {
-        []const u8, []u8 => "::TEXT",
-        [][]const u8, [][]u8 => "::TEXT[]",
-        i16 => "::SMALLINT",
-        []i16 => "::SMALLINT[]",
-        i64 => "::BIGINT",
-        []i64 => "::BIGINT[]",
+        []const u8, []u8 => types[0],
+        [][]const u8, [][]u8 => types[1],
+        i16 => types[2],
+        []i16 => types[3],
+        i64 => types[4],
+        []i64 => types[5],
+        bool => types[6],
+        []bool => types[7],
         else => "",
     };
 }
