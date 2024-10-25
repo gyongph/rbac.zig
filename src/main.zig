@@ -109,7 +109,6 @@ pub fn MainModule(role: type) type {
 
         const Server = struct {
             pg_pool: *pg.Pool,
-            port: u16,
             http_server: httpz.Server(*Global) = undefined,
 
             pub fn register(self: *Server, module: anytype) !void {
@@ -163,14 +162,12 @@ pub fn MainModule(role: type) type {
         };
         pub fn createServer(
             alloc: std.mem.Allocator,
-            args: struct {
-                pg_pool: *pg.Pool,
-                port: u16,
-            },
+            pg_pool: *pg.Pool,
+            server_config: httpz.Config,
         ) !Server {
             _global = Global{
                 .request_id = "1234567".*,
-                .pg_pool = args.pg_pool,
+                .pg_pool = pg_pool,
                 .auth = .{
                     .id = null,
                     .role = .Guest,
@@ -178,16 +175,12 @@ pub fn MainModule(role: type) type {
             };
             var server = try httpz.Server(*Global).init(
                 alloc,
-                .{
-                    .port = args.port,
-                    .request = .{ .max_form_count = 25 },
-                },
+                server_config,
                 &_global,
             );
             _ = &server;
             return Server{
-                .pg_pool = args.pg_pool,
-                .port = args.port,
+                .pg_pool = pg_pool,
                 .http_server = server,
             };
         }
