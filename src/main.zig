@@ -483,7 +483,7 @@ pub fn MainModule(role: type) type {
                                             const base_type = Utils.BaseType.get(f.type);
                                             switch (base_type) {
                                                 []u8, []const u8 => try columns.append(f.name ++ "::TEXT"),
-                                                [][]u8, [][]const u8 => try columns.append(f.name ++ "::TEXT"),
+                                                [][]u8, [][]const u8 => try columns.append(f.name ++ "::TEXT[]"),
                                                 else => try columns.append(f.name),
                                             }
                                         }
