@@ -613,14 +613,34 @@ pub fn MainModule(role: type) type {
 
                             const conn = try ctx.pg_pool.acquire();
                             defer conn.release();
-                            const columns = try std.mem.join(alloc, ", ", keys);
+                            var columns = std.ArrayList([]const u8).init(req.arena);
+                            defer columns.deinit();
+
+                            inline for (std.meta.fields(Schema)) |f| {
+                                var found = false;
+                                for (keys) |k| {
+                                    if (std.mem.eql(u8, f.name, k)) {
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                                if (found) {
+                                    const base_type = Utils.BaseType.get(f.type);
+                                    switch (base_type) {
+                                        []u8, []const u8 => try columns.append(f.name ++ "::TEXT"),
+                                        [][]u8, [][]const u8 => try columns.append(f.name ++ "::TEXT[]"),
+                                        else => try columns.append(f.name),
+                                    }
+                                }
+                            }
+
                             const query_args = try std.mem.concat(
                                 alloc,
                                 u8,
                                 &.{
                                     try allocPrint(alloc, "update {s} set ", .{self.name}), // update operation
                                     args,
-                                    try allocPrint(alloc, " where id = ${d} returning {s}", .{ update_arg_count + 1, columns }), //where,
+                                    try allocPrint(alloc, " where id = ${d} returning {s}", .{ update_arg_count + 1, try std.mem.join(req.arena, ",", columns.items) }), //where,
                                 },
                             );
 
