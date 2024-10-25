@@ -43,3 +43,53 @@ test "allocRandom" {
     const invalid_char_pos = std.mem.indexOfNonePos(u8, random_sample, 0, seed); // checks if found unknown character
     try testing.expect(invalid_char_pos == null);
 }
+
+pub fn isStringType(T: type) bool {
+    const info = @typeInfo(T);
+    switch (info) {
+        .pointer => |ptr| {
+            if (ptr.size == .Slice and ptr.child == u8) return true;
+            return isStringType(ptr.child);
+        },
+        .optional => |opt| return isStringType(opt.child),
+        .array => |arr| {
+            if (arr.child == u8) return true;
+            return false;
+        },
+        else => return false,
+    }
+}
+
+test isStringType {
+    try testing.expect(isStringType([]u8));
+    try testing.expect(isStringType(*[]u8));
+    try testing.expect(isStringType(*?[]u8));
+    try testing.expect(isStringType(?*[]u8));
+    try testing.expect(isStringType(?[]u8));
+    try testing.expect(isStringType([]const u8));
+    try testing.expect(isStringType(*[]const u8));
+    try testing.expect(isStringType(?[]const u8));
+    try testing.expect(isStringType(?*[]const u8));
+    try testing.expect(isStringType(u8) == false);
+    try testing.expect(isStringType(?u8) == false);
+    try testing.expect(isStringType(*u8) == false);
+    try testing.expect(isStringType(?*u8) == false);
+    try testing.expect(isStringType(*?u8) == false);
+    try testing.expect(isStringType(u1) == false);
+    try testing.expect(isStringType([]u1) == false);
+    try testing.expect(isStringType(*[]u1) == false);
+    try testing.expect(isStringType(?[]u1) == false);
+    try testing.expect(isStringType(*?[]u1) == false);
+    try testing.expect(isStringType(?*[]u1) == false);
+    try testing.expect(isStringType(i16) == false);
+    try testing.expect(isStringType(?i16) == false);
+    try testing.expect(isStringType(*i16) == false);
+    try testing.expect(isStringType(?*i16) == false);
+    try testing.expect(isStringType(*?i16) == false);
+    try testing.expect(isStringType(i16) == false);
+    try testing.expect(isStringType([]i16) == false);
+    try testing.expect(isStringType(*[]i16) == false);
+    try testing.expect(isStringType(?[]i16) == false);
+    try testing.expect(isStringType(*?[]i16) == false);
+    try testing.expect(isStringType(?*[]i16) == false);
+}
