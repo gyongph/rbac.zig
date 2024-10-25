@@ -332,10 +332,16 @@ pub fn MainModule(role: type) type {
                             if (f.bits.mask == 0) @panic("Empty selected_fields, must have at least one");
                             var fields = std.ArrayList([]const u8).init(allocator);
                             defer fields.deinit();
-                            var itr = f.iterator();
-                            while (itr.next()) |_f| {
-                                const field_name = @tagName(_f);
-                                try fields.append(field_name);
+                            inline for (std.meta.fields(Schema)) |sch_field| {
+                                const tag = std.meta.stringToEnum(Fields, sch_field.name).?;
+                                if (f.contains(tag)) {
+                                    const base_type = Utils.BaseType.get(sch_field.type);
+                                    switch (base_type) {
+                                        []u8, []const u8 => try fields.append(sch_field.name ++ "::TEXT"),
+                                        [][]u8, [][]const u8 => try fields.append(sch_field.name ++ "::TEXT[]"),
+                                        else => try fields.append(sch_field.name),
+                                    }
+                                }
                             }
                             break :blk try std.mem.join(allocator, ",", fields.items);
                         },
