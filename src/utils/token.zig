@@ -67,7 +67,6 @@ pub fn ParsedToken(data: type) type {
         data: data,
         created_at: i64,
         expires_at: i64,
-        buffer: []u8,
     };
 }
 
