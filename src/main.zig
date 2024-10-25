@@ -412,7 +412,7 @@ pub fn MainModule(role: type) type {
                     res.status = 200;
                     try res.json(.{
                         .page = page,
-                        .total_pages = try std.math.divCeil(u64, @as(u64, @floatFromInt(total_count)), limit),
+                        .total_pages = try std.math.divCeil(u64, @as(u64, @intCast(total_count)), limit),
                         .limit = limit,
                         .total_count = total_count,
                         .items = list.items,
