@@ -4,6 +4,7 @@ const DB = @import("db.zig");
 const MainModule = @import("main.zig").MainModule;
 const Utils = @import("utils/lib.zig");
 const TypeUtils = @import("type-utils.zig");
+const SecurityToken = @import("main.zig").SecurityToken;
 const StructFieldsAsEnum = TypeUtils.StructFieldsAsEnum;
 const EnvVar = Utils.EnvVar;
 const Request = httpz.Request;
@@ -92,16 +93,28 @@ const AddressModule = main_module.Module(Address, AddressField, Accesor, null).i
     },
     .field_access = .{
         .Admin = .{
-            .update = AddressFieldSet.initEmpty(),
-            .read = AddressFieldSet.initEmpty(),
+            .update = .{
+                .fields = AddressFieldSet.initEmpty(),
+            },
+            .read = .{
+                .fields = AddressFieldSet.initEmpty(),
+            },
         },
         .Owner = .{
-            .update = AddressFieldSet.initEmpty(),
-            .read = AddressFieldSet.initEmpty(),
+            .update = .{
+                .fields = AddressFieldSet.initEmpty(),
+            },
+            .read = .{
+                .fields = AddressFieldSet.initEmpty(),
+            },
         },
         .Public = .{
-            .update = AddressFieldSet.initEmpty(),
-            .read = AddressFieldSet.initEmpty(),
+            .update = .{
+                .fields = AddressFieldSet.initEmpty(),
+            },
+            .read = .{
+                .fields = AddressFieldSet.initEmpty(),
+            },
         },
     },
 });
@@ -128,16 +141,28 @@ const UserModule = main_module.Module(User, UserField, Accesor, sub_modules).ini
     },
     .field_access = .{
         .Admin = .{
-            .update = UserFieldSet.initEmpty(),
-            .read = UserFieldSet.initEmpty(),
+            .update = .{
+                .fields = UserFieldSet.initEmpty(),
+            },
+            .read = .{
+                .fields = UserFieldSet.initEmpty(),
+            },
         },
         .Owner = .{
-            .update = UserFieldSet.initEmpty(),
-            .read = UserFieldSet.initEmpty(),
+            .update = .{
+                .fields = UserFieldSet.initEmpty(),
+            },
+            .read = .{
+                .fields = UserFieldSet.initEmpty(),
+            },
         },
         .Public = .{
-            .update = UserFieldSet.initEmpty(),
-            .read = UserFieldSet.initEmpty(),
+            .update = .{
+                .fields = UserFieldSet.initEmpty(),
+            },
+            .read = .{
+                .fields = UserFieldSet.initEmpty(),
+            },
         },
     },
 });
@@ -172,35 +197,26 @@ test "UserModule" {
     try testing.expect(@hasField(T_field_access, "Owner"));
     try testing.expect(@hasField(T_field_access, "Public"));
     try testing.expect(@typeInfo(T_field_access).@"struct".fields.len == 3);
-    try testing.expect(@TypeOf(field_access.Admin.?.read) == UserFieldSet);
-    try testing.expect(@TypeOf(field_access.Admin.?.update) == UserFieldSet);
-    try testing.expect(@TypeOf(field_access.Owner.?.read) == UserFieldSet);
-    try testing.expect(@TypeOf(field_access.Owner.?.update) == UserFieldSet);
-    try testing.expect(@TypeOf(field_access.Public.?.read) == UserFieldSet);
-    try testing.expect(@TypeOf(field_access.Public.?.update) == UserFieldSet);
+    try testing.expect(field_access.Admin.?.read == .fields);
+    try testing.expect(field_access.Admin.?.update == .fields);
+    try testing.expect(@TypeOf(field_access.Admin.?.read.fields.?) == UserFieldSet);
+    try testing.expect(@TypeOf(field_access.Admin.?.update.fields.?) == UserFieldSet);
+    try testing.expect(@TypeOf(field_access.Owner.?.read.fields.?) == UserFieldSet);
+    try testing.expect(@TypeOf(field_access.Owner.?.update.fields.?) == UserFieldSet);
+    try testing.expect(@TypeOf(field_access.Public.?.read.fields.?) == UserFieldSet);
+    try testing.expect(@TypeOf(field_access.Public.?.update.fields.?) == UserFieldSet);
 }
 
-test "Token" {
-    const secret = "asdfkjjkljdfsfaslkdjf";
-    const testing_allocator = testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(testing_allocator);
-    const allocator = arena.allocator();
-    defer arena.deinit();
-    const Token = main_module.Token;
-    const payload = .{ .id = "user1", .role = .Admin, .expires_at = 5 };
-    const result = try Token.create(allocator, payload, secret);
-    const parsed = try Token.parse(allocator, result.token, secret);
-    try testing.expectEqualStrings(parsed.id, payload.id);
-    try testing.expectEqual(parsed.role, payload.role);
+test "server" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    const db = try DB.init(allocator, 20);
+    var server = try main_module.createServer(
+        allocator,
+        db,
+        .{
+            .port = 4545,
+        },
+    );
+    try server.register(&UserModule);
 }
-
-// test "server" {
-//     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-//     const allocator = gpa.allocator();
-//     const db = try DB.init(allocator, 20);
-//     var server = try main_module.createServer(allocator, .{
-//         .pg_pool = db,
-//         .port = 5454,
-//     });
-//     try server.register(&UserModule);
-// }
