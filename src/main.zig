@@ -480,8 +480,12 @@ pub fn MainModule(role: type) type {
                                     inline for (std.meta.fields(Schema)) |f| {
                                         const tag = std.meta.stringToEnum(schema_fields.?, f.name).?;
                                         if (read_access.contains(tag)) {
-                                            const pg_type = Utils.PGType.get(f.type);
-                                            try columns.append(f.name ++ pg_type);
+                                            const base_type = Utils.BaseType.get(f.type);
+                                            switch (base_type) {
+                                                []u8, []const u8 => try columns.append(f.name ++ "::TEXT"),
+                                                [][]u8, [][]const u8 => try columns.append(f.name ++ "::TEXT"),
+                                                else => try columns.append(f.name),
+                                            }
                                         }
                                     }
                                     const stringed_columns = try std.mem.join(alloc, ", ", columns.items);
