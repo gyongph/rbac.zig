@@ -46,8 +46,8 @@ pub fn MainModule(role: type) type {
                 };
                 select: Select,
                 where: []const u8,
-                page: usize = 1,
-                limit: usize = config.default_max_list_limit,
+                page: u64 = 1,
+                limit: u64 = config.default_max_list_limit,
             };
         }
         pub const Global = struct {
@@ -412,7 +412,7 @@ pub fn MainModule(role: type) type {
                     res.status = 200;
                     try res.json(.{
                         .page = page,
-                        .total_pages = try std.math.divCeil(f64, @as(f64, @floatFromInt(total_count)), @as(f64, @floatFromInt(limit))),
+                        .total_pages = try std.math.divCeil(u64, @as(u64, @floatFromInt(total_count)), limit),
                         .limit = limit,
                         .total_count = total_count,
                         .items = list.items,
