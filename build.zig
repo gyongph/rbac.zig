@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) !void {
     {
         // test step
         const lib_test = b.addTest(.{
-            .root_source_file = b.path("src/test.zig"),
+            .root_source_file = b.path("src/main.test.zig"),
             .target = target,
             .optimize = optimize,
             .test_runner = b.path("test-runner.zig"),
